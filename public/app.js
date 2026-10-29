@@ -473,10 +473,13 @@ async function renderStack(name) {
             <span class="hint">${t('bak.stackLead')}</span></div>
           <pre class="terminal" id="sb-log" hidden></pre>
         </div>
-        <div class="card"><h2>${t('bak.snapshots')}</h2><div id="sb-snaps"><p class="hint">${t('stack.loading')}</p></div></div>`;
-      const loadSnaps = async () => {
+        <div class="card"><div class="row" style="justify-content:space-between;margin-bottom:8px"><h2 style="margin:0">${t('bak.snapshots')}</h2>
+          <button type="button" class="btn small" id="sb-refresh" title="${esc(t('bak.refreshTitle'))}">${t('logs.refresh')}</button></div>
+          <div id="sb-snaps"><p class="hint">${t('stack.loading')}</p></div></div>`;
+      const loadSnaps = async (fresh = false) => {
         const box = document.getElementById('sb-snaps');
-        const list = await api('GET', `/api/backups/snapshots?stack=${encodeURIComponent(name)}&fresh=1`)
+        if (fresh) box.innerHTML = `<p class="hint">${t('stack.loading')}</p>`;
+        const list = await api('GET', `/api/backups/snapshots?stack=${encodeURIComponent(name)}${fresh ? '&fresh=1' : ''}`)
           .catch((err) => { box.innerHTML = errorBox(err); return null; });
         if (list && currentTab === 'backups') {
           snapshotsTable(box, list, {
@@ -498,6 +501,7 @@ async function renderStack(name) {
         try { await api('POST', `/api/stacks/${name}/backup`); } catch (err) { toast(err.message); return; }
         follow();
       });
+      document.getElementById('sb-refresh').addEventListener('click', () => loadSnaps(true));
       if (b.status.running || b.status.queued) follow();
       loadSnaps();
     },
@@ -1218,7 +1222,9 @@ async function settingsBackups(body) {
       <div id="bk-out"></div>
       <button class="btn primary">${t('bak.saveTest')}</button>
     </form>
-    ${c.configured ? `<div class="card"><h2>${t('bak.snapshots')}</h2><div id="bk-snaps"><p class="hint">${t('stack.loading')}</p></div></div>` : ''}`;
+    ${c.configured ? `<div class="card"><div class="row" style="justify-content:space-between;margin-bottom:8px"><h2 style="margin:0">${t('bak.snapshots')}</h2>
+      <button type="button" class="btn small" id="bk-refresh" title="${esc(t('bak.refreshTitle'))}">${t('logs.refresh')}</button></div>
+      <div id="bk-snaps"><p class="hint">${t('stack.loading')}</p></div></div>` : ''}`;
 
   // Destination presets: help text, and the address filled in from the region.
   const epFor = (dest, region) => (dest?.endpoint && !dest.endpoint.includes('<') ? dest.endpoint.replace('{region}', region) : '');
@@ -1308,9 +1314,14 @@ async function settingsBackups(body) {
   if (st.running || st.queued) startJob(null); // a job is already running: just follow it
 
   const snapsBox = document.getElementById('bk-snaps');
-  if (snapsBox) {
-    const list = await api('GET', '/api/backups/snapshots?fresh=1').catch((err) => { snapsBox.innerHTML = errorBox(err); return null; });
+  const loadAll = async (fresh = false) => {
+    if (fresh) snapsBox.innerHTML = `<p class="hint">${t('stack.loading')}</p>`;
+    const list = await api('GET', `/api/backups/snapshots${fresh ? '?fresh=1' : ''}`).catch((err) => { snapsBox.innerHTML = errorBox(err); return null; });
     if (list && route().tab === 'backups') snapshotsTable(snapsBox, list.filter((x) => x.stack), { showStack: true });
+  };
+  if (snapsBox) {
+    document.getElementById('bk-refresh').addEventListener('click', () => loadAll(true));
+    loadAll();
   }
 }
 

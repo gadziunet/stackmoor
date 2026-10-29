@@ -150,7 +150,7 @@ export function createBackups({ db, stacks, stacksDir, dataDir, sqlite }) {
     const where = (x, y) => `${repoUrl(x)}|${y.accessKey}|${y.password}`;
     if (where(c, s) !== where(old, oldSecrets)) {
       setState(db, 'backup.initialized', false);
-      snapshotCache = null;
+      setState(db, 'backup.snapshots', null);
     }
     setState(db, 'backup.config', c);
     setState(db, 'backup.secrets', encrypt(s));
@@ -214,7 +214,6 @@ export function createBackups({ db, stacks, stacksDir, dataDir, sqlite }) {
   let queued = 0;
   let current = null;
   let lastLog = '';
-  let snapshotCache = null;
 
   function history() { return getState(db, 'backup.history', []); }
   function addHistory(entry) { setState(db, 'backup.history', [entry, ...history()].slice(0, 50)); }
@@ -238,9 +237,11 @@ export function createBackups({ db, stacks, stacksDir, dataDir, sqlite }) {
         addHistory({ at: current.startedAt, kind, stack, ok: false, durationMs: Date.now() - started, error: err.key ? t(err.key, err.vars) : err.message });
         throw err;
       } finally {
+        // Refresh the saved list of snapshots before the job counts as finished,
+        // so the UI shows the new state as soon as it sees the job end.
+        if (kind !== 'verify') await loadSnapshots().catch(() => {});
         lastLog = current.log;
         current = null;
-        snapshotCache = null;
       }
     });
     queue = p.catch(() => {});
@@ -417,9 +418,20 @@ export function createBackups({ db, stacks, stacksDir, dataDir, sqlite }) {
 
   // ---------- snapshots and restore ----------
 
+  /**
+   * The list of snapshots is kept in the panel's database: reading it from the bucket takes
+   * a few seconds, and it only changes when the panel itself backs up, prunes or restores
+   * (the list is refreshed after every job). fresh = read it from the bucket now.
+   */
   async function snapshots({ fresh = false } = {}) {
     if (!configured()) return [];
-    if (snapshotCache && !fresh && Date.now() - snapshotCache.at < 60_000) return snapshotCache.list;
+    const saved = getState(db, 'backup.snapshots');
+    if (saved && !fresh) return saved.list;
+    return loadSnapshots();
+  }
+
+  async function loadSnapshots() {
+    if (!configured()) return [];
     const r = await restic(['snapshots', '--json', '--host', HOST], () => {}, { quiet: true });
     if (r.code !== 0) {
       if (/does not exist|Is there a repository|unable to open config/i.test(r.stderr)) return [];
@@ -436,7 +448,7 @@ export function createBackups({ db, stacks, stacksDir, dataDir, sqlite }) {
       preUpdate: (s.tags || []).includes('pre-update'),
       size: s.summary?.total_bytes_processed ?? null,
     })).sort((a, b) => b.time.localeCompare(a.time));
-    snapshotCache = { at: Date.now(), list };
+    setState(db, 'backup.snapshots', { at: new Date().toISOString(), list });
     return list;
   }
 
@@ -456,7 +468,8 @@ export function createBackups({ db, stacks, stacksDir, dataDir, sqlite }) {
 
   /** Restores a snapshot into stack `target` (default: the stack it came from). */
   async function restore(snapshotId, target, t, extraLog) {
-    const snap = (await snapshots({ fresh: true })).find((s) => s.id === snapshotId || s.shortId === snapshotId);
+    const match = (list) => list.find((s) => s.id === snapshotId || s.shortId === snapshotId);
+    const snap = match(await snapshots()) || match(await snapshots({ fresh: true }));
     if (!snap || !snap.stack) throw new UserError('backup.noSnapshot', {}, 404);
     const name = target || snap.stack;
     stacks.assertName(name);
@@ -525,6 +538,7 @@ export function createBackups({ db, stacks, stacksDir, dataDir, sqlite }) {
       running: current ? { kind: current.kind, stack: current.stack, startedAt: current.startedAt } : null,
       queued,
       log: current ? current.log : lastLog,
+      snapshotsAt: getState(db, 'backup.snapshots')?.at || null,
       history: history().slice(0, 15),
       verify: getState(db, 'backup.verify'),
       verifyData: getState(db, 'backup.verifyData'),
