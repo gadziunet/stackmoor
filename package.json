@@ -13,7 +13,7 @@
     "node": ">=20"
   },
   "dependencies": {
-    "better-sqlite3": "^11.7.0",
+    "better-sqlite3": "^13.0.3",
     "express": "^4.21.2",
     "yaml": "^2.7.0"
   },
