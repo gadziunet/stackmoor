@@ -246,6 +246,11 @@ app.put('/api/domains', wrap(async (req, res) => {
   res.json(domains.publicConfig());
 }));
 
+app.put('/api/domains/panel', wrap(async (req, res) => {
+  await domains.savePanel(req.body || {}, req.hostname);
+  res.json(domains.publicConfig());
+}));
+
 app.post('/api/domains/apply', wrap(async (req, res) => {
   const write = openStream(res);
   let ok = true;
@@ -304,7 +309,9 @@ app.use('/api', (req, res) => fail(req, res, 404, 'notFound'));
 // ---------- UI ----------
 
 const publicDir = path.join(__dirname, '..', 'public');
-app.use(express.static(publicDir, { index: 'index.html', maxAge: '1h' }));
+// No caching without asking: after an update the browser must not keep the old UI.
+// (ETags keep it cheap – an unchanged file is answered with 304.)
+app.use(express.static(publicDir, { index: 'index.html', maxAge: 0, setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache') }));
 app.get('*', (_req, res) => res.sendFile(path.join(publicDir, 'index.html')));
 
 // eslint-disable-next-line no-unused-vars

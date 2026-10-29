@@ -847,7 +847,22 @@ async function settingsDomains(body) {
     `<option value="internal" ${d.dnsProvider === 'internal' ? 'selected' : ''}>${t('dom.internal')}</option>`,
   ].join('');
 
+  const panelBox = !d.domain ? '' : `
+    <form class="card" id="panel-form">
+      <h2>${t('dom.panelTitle')}</h2>
+      <div class="field"><label for="dom-panel">${t('dom.panelSub')}</label>
+        <div class="row" style="align-items:center;gap:6px;flex-wrap:nowrap">
+          <input type="text" id="dom-panel" value="${esc(d.panelSubdomain)}" placeholder="stackmoor" autocapitalize="off" autocomplete="off" style="flex:1;min-width:0">
+          <span class="hint" style="white-space:nowrap">.${esc(d.domain)}</span>
+        </div>
+        <p class="hint">${t('dom.panelSubHint')}</p>
+        <div id="dom-lock"></div></div>
+      <div id="panel-out"></div>
+      <button class="btn primary">${t('dom.panelSave')}</button>
+    </form>`;
+
   body.innerHTML = `
+    ${panelBox}
     ${statusBox}
     <form class="card" id="dom-form">
       <h2>${t('dom.title')}</h2>
@@ -855,10 +870,6 @@ async function settingsDomains(body) {
       <div class="field"><label for="dom-domain">${t('dom.domain')}</label>
         <input type="text" id="dom-domain" value="${esc(d.domain)}" placeholder="home.example.com" autocapitalize="off" autocomplete="off">
         <p class="hint">${t('dom.domainHint')}</p></div>
-      <div class="field"><label for="dom-panel">${t('dom.panelSub')} <span class="hint">${t('new.envOptional')}</span></label>
-        <input type="text" id="dom-panel" value="${esc(d.panelSubdomain)}" placeholder="stackmoor" autocapitalize="off" autocomplete="off">
-        <p class="hint">${t('dom.panelSubHint')}</p>
-        <div id="dom-lock"></div></div>
       <div class="field"><label for="dom-provider">${t('dom.provider')}</label>
         <select id="dom-provider" class="lang">${providerOptions}</select></div>
       <div id="dom-fields"></div>
@@ -901,9 +912,10 @@ async function settingsDomains(body) {
   // The IP lock can only be switched on from the panel's own address (proof that it works).
   const drawLock = () => {
     const box = document.getElementById('dom-lock');
-    const domain = document.getElementById('dom-domain').value.trim().toLowerCase();
+    if (!box) return;
+    const domain = d.domain;
     const sub = document.getElementById('dom-panel').value.trim().toLowerCase();
-    if (!domain || !sub) { box.innerHTML = ''; return; }
+    if (!sub) { box.innerHTML = ''; return; }
     const url = `https://${sub}.${domain}`;
     const here = location.hostname === `${sub}.${domain}`;
     const prev = document.getElementById('dom-lock-on');
@@ -914,8 +926,21 @@ async function settingsDomains(body) {
       <p class="hint">${here || d.panelDomainOnly ? t('dom.lockHint') : t('dom.lockOpenFirst', { url: esc(url) })}</p>`;
   };
   drawLock();
-  document.getElementById('dom-domain').addEventListener('input', drawLock);
-  document.getElementById('dom-panel').addEventListener('input', drawLock);
+  document.getElementById('dom-panel')?.addEventListener('input', drawLock);
+  document.getElementById('panel-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const out = document.getElementById('panel-out');
+    try {
+      await api('PUT', '/api/domains/panel', {
+        panelSubdomain: document.getElementById('dom-panel').value,
+        panelDomainOnly: Boolean(document.getElementById('dom-lock-on')?.checked),
+      });
+      toast(t('toast.saved'));
+      settingsDomains(body);
+    } catch (err) {
+      out.innerHTML = errorBox(err);
+    }
+  });
   document.getElementById('dom-refresh')?.addEventListener('click', () => settingsDomains(body));
 
   document.getElementById('dom-form').addEventListener('submit', async (e) => {
@@ -928,8 +953,6 @@ async function settingsDomains(body) {
         domain: document.getElementById('dom-domain').value,
         dnsProvider: document.getElementById('dom-provider').value,
         acmeEmail: document.getElementById('dom-email').value,
-        panelSubdomain: document.getElementById('dom-panel').value,
-        panelDomainOnly: Boolean(document.getElementById('dom-lock-on')?.checked),
         httpPort: Number(document.getElementById('dom-http').value),
         httpsPort: Number(document.getElementById('dom-https').value),
         credentials,

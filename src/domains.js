@@ -76,13 +76,15 @@ export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings
    *   turned on from the panel's own address, which proves that address works.
    */
   function saveConfig(body, currentHost = '') {
+    const saved = getSettings();
     const domain = String(body.domain ?? '').trim().toLowerCase().replace(/^\*\./, '').replace(/\.$/, '');
     if (domain && !DOMAIN_RE.test(domain)) throw new UserError('dns.badDomain', { domain });
 
     const provider = String(body.dnsProvider || '');
     if (domain && provider !== 'internal' && !providerById(provider)) throw new UserError('dns.badProvider');
 
-    const panelSubdomain = String(body.panelSubdomain ?? '').trim().toLowerCase();
+    // The panel address has its own section; the main form leaves it as it is.
+    const panelSubdomain = String(body.panelSubdomain ?? saved.panelSubdomain ?? '').trim().toLowerCase();
     if (panelSubdomain && !SUBDOMAIN_RE.test(panelSubdomain)) throw new UserError('dns.badSubdomain', { sub: panelSubdomain });
     if (panelSubdomain && db.prepare('SELECT 1 FROM routes WHERE subdomain = ?').get(panelSubdomain)) {
       throw new UserError('dns.subdomainTaken', { sub: panelSubdomain });
@@ -113,11 +115,39 @@ export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings
       if (v) next[f.key] = v;
     }
     setState(db, 'dns.credentials', encrypt(next));
-    const panelDomainOnly = Boolean(body.panelDomainOnly) && Boolean(domain && panelSubdomain);
+    const panelDomainOnly = Boolean(body.panelDomainOnly ?? saved.panelDomainOnly) && Boolean(domain && panelSubdomain);
     if (panelDomainOnly && String(currentHost).toLowerCase() !== `${panelSubdomain}.${domain}`) {
       throw new UserError('dns.lockNeedsDomain', { url: `https://${panelSubdomain}.${domain}` });
     }
     saveSettings({ domain, dnsProvider: provider, acmeEmail: email, httpPort, httpsPort, panelSubdomain, panelDomainOnly });
+  }
+
+  /** Panel address and IP lock only – needs just a config reload, not a Caddy restart. */
+  async function savePanel(body, currentHost = '') {
+    const s = getSettings();
+    if (!s.domain) throw new UserError('dns.noDomain');
+    const panelSubdomain = String(body.panelSubdomain ?? '').trim().toLowerCase();
+    if (panelSubdomain && !SUBDOMAIN_RE.test(panelSubdomain)) throw new UserError('dns.badSubdomain', { sub: panelSubdomain });
+    if (panelSubdomain && db.prepare('SELECT 1 FROM routes WHERE subdomain = ?').get(panelSubdomain)) {
+      throw new UserError('dns.subdomainTaken', { sub: panelSubdomain });
+    }
+    const panelDomainOnly = Boolean(body.panelDomainOnly) && Boolean(panelSubdomain);
+    if (panelDomainOnly && String(currentHost).toLowerCase() !== `${panelSubdomain}.${s.domain}`) {
+      throw new UserError('dns.lockNeedsDomain', { url: `https://${panelSubdomain}.${s.domain}` });
+    }
+    saveSettings({ panelSubdomain, panelDomainOnly });
+    await reloadConfig();
+  }
+
+  /** Rewrites caddy.json and reloads it in the running container (no pull, no restart). */
+  async function reloadConfig() {
+    writeFile(path.join(caddyDir, 'config', 'caddy.json'), JSON.stringify(await buildConfig(), null, 2), 0o600);
+    const ps = await docker(['inspect', '--format', '{{.State.Status}}', CADDY]);
+    if (ps.code !== 0 || ps.stdout.trim() !== 'running') return false;
+    const r = await docker(['exec', CADDY, 'caddy', 'reload', '--config', '/etc/caddy/caddy.json']);
+    if (r.code !== 0) throw new UserError('dns.reloadFailed');
+    await refreshCaddyIp();
+    return true;
   }
 
   // ---------- routes ----------
@@ -319,8 +349,11 @@ export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings
     }
 
     log(`$ docker compose -p ${CADDY} up -d\n`);
-    const up = await docker([...composeArgs(), 'pull', '--quiet'], { onData: log });
-    if (up.code !== 0) log(t('dns.log.pullFailed') + '\n');
+    // Pull only when the image is not here yet – saving settings should not download anything.
+    if ((await docker(['image', 'inspect', image])).code !== 0) {
+      const pull = await docker([...composeArgs(), 'pull', '--quiet'], { onData: log });
+      if (pull.code !== 0) log(t('dns.log.pullFailed') + '\n');
+    }
     const before = await containerId();
     const r = await docker([...composeArgs(), 'up', '-d', '--remove-orphans'], { onData: log });
     if (r.code !== 0) throw new UserError('step.exitCode', { code: r.code });
@@ -383,6 +416,6 @@ export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings
 
   return {
     publicConfig, saveConfig, routes, setRoutes, removeStack, writeOverride, apply, status, buildConfig,
-    panelUrl, refreshCaddyIp, attachSelf, caddyIp: () => caddyIp,
+    panelUrl, refreshCaddyIp, attachSelf, savePanel, reloadConfig, caddyIp: () => caddyIp,
   };
 }
