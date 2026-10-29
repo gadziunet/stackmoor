@@ -323,7 +323,7 @@ async function renderStack(name) {
     <div id="notice"></div>
     <div id="op-wrap" hidden><h2 id="op-title">${t('act.operation')}</h2><pre class="terminal" id="op"></pre><br></div>
     <div class="tabs" role="tablist">
-      ${['compose', 'env', 'containers', 'logs', 'history', 'delete']
+      ${['compose', 'env', 'domain', 'containers', 'logs', 'history', 'delete']
         .map((k, i) => `<button data-tab="${k}" class="${i === 0 ? 'on' : ''}">${t(`tab.${k}`)}</button>`).join('')}
     </div>
     <div id="tab"></div>`;
@@ -468,6 +468,91 @@ async function renderStack(name) {
       }));
     },
 
+    async domain() {
+      tab.innerHTML = `<p class="hint">${t('stack.loading')}</p>`;
+      let info;
+      try {
+        info = await api('GET', `/api/stacks/${name}/routes`);
+      } catch (err) {
+        tab.innerHTML = errorBox(err);
+        return;
+      }
+      if (currentTab !== 'domain') return;
+      if (!info.domain) {
+        tab.innerHTML = `<div class="card"><p class="hint">${t('route.noDomain')}</p>
+          <a class="btn" href="#/settings/domains">${t('route.goSettings')}</a></div>`;
+        return;
+      }
+      let rows = info.routes.length ? info.routes.map((r) => ({ ...r })) : [];
+      const svcOptions = (sel) => info.services.map((sv) =>
+        `<option value="${esc(sv.name)}" ${sv.name === sel ? 'selected' : ''}>${esc(sv.name)}</option>`).join('');
+      const suggestedPort = (svc) => info.services.find((x) => x.name === svc)?.ports?.[0] || '';
+      const draw = () => {
+        tab.innerHTML = `
+          <div class="card">
+            <h2>${t('route.title')}</h2>
+            <p class="hint" style="margin-top:-4px">${t('route.lead', { domain: esc(info.domain) })}</p>
+            <div id="route-rows">
+              ${rows.map((r, i) => `
+                <div class="route-row" data-i="${i}">
+                  <div class="route-host"><input type="text" class="r-sub" value="${esc(r.subdomain)}" aria-label="${esc(t('route.subdomain'))}" placeholder="${esc(name)}" autocapitalize="off"><span>.${esc(info.domain)}</span></div>
+                  <select class="r-svc lang" aria-label="${esc(t('route.service'))}">${svcOptions(r.service)}</select>
+                  <input type="number" class="r-port" value="${esc(r.port)}" min="1" max="65535" aria-label="${esc(t('route.port'))}" placeholder="${esc(t('route.port'))}">
+                  <button type="button" class="btn small danger r-del" aria-label="${esc(t('route.remove'))}">✕</button>
+                </div>`).join('') || `<p class="hint">${t('route.none')}</p>`}
+            </div>
+            <p class="hint">${t('route.portHint')}</p>
+            <div id="route-out"></div>
+            <div class="row">
+              <button type="button" class="btn" id="route-add">${t('route.add')}</button>
+              <button type="button" class="btn primary" id="route-save">${t('edit.save')}</button>
+            </div>
+          </div>
+          ${info.routes.length ? `<div class="card"><h2>${t('route.open')}</h2><ul class="link-list">${info.routes.map((r) =>
+            `<li><a href="https://${esc(r.subdomain)}.${esc(info.domain)}" target="_blank" rel="noopener">https://${esc(r.subdomain)}.${esc(info.domain)}</a></li>`).join('')}</ul></div>` : ''}`;
+        const read = () => {
+          rows = [...tab.querySelectorAll('.route-row')].map((el) => ({
+            subdomain: el.querySelector('.r-sub').value.trim().toLowerCase(),
+            service: el.querySelector('.r-svc').value,
+            port: Number(el.querySelector('.r-port').value),
+          }));
+        };
+        tab.querySelectorAll('.r-svc').forEach((sel) => sel.addEventListener('change', (e) => {
+          const port = e.target.closest('.route-row').querySelector('.r-port');
+          if (!port.value) port.value = suggestedPort(e.target.value);
+        }));
+        tab.querySelectorAll('.r-del').forEach((b) => b.addEventListener('click', (e) => {
+          read();
+          rows.splice(Number(e.target.closest('.route-row').dataset.i), 1);
+          draw();
+        }));
+        document.getElementById('route-add').addEventListener('click', () => {
+          read();
+          const svc = info.services[0]?.name || '';
+          rows.push({ subdomain: rows.length ? '' : name, service: svc, port: suggestedPort(svc) });
+          draw();
+        });
+        document.getElementById('route-save').addEventListener('click', async (e) => {
+          read();
+          e.target.disabled = true;
+          const out = document.getElementById('route-out');
+          out.innerHTML = `<p class="hint">${t('route.applying')}</p>`;
+          try {
+            const r = await api('PUT', `/api/stacks/${name}/routes`, { routes: rows });
+            info.routes = r.routes;
+            rows = r.routes.map((x) => ({ ...x }));
+            draw();
+            if (r.applied) toast(t('edit.saved'));
+            else document.getElementById('route-out').innerHTML = `<div class="notice error">${esc(r.log.trim().split('\n').slice(-6).join('\n'))}</div>`;
+          } catch (err) {
+            out.innerHTML = errorBox(err);
+            e.target.disabled = false;
+          }
+        });
+      };
+      draw();
+    },
+
     delete() {
       tab.innerHTML = `
         <div class="card">
@@ -548,7 +633,7 @@ async function renderStack(name) {
   if (autostart) runAction('up');
 }
 
-const SETTINGS_TABS = ['general', 'updates', 'backups', 'account'];
+const SETTINGS_TABS = ['general', 'domains', 'updates', 'backups', 'account'];
 
 async function renderSettings(tab = 'general') {
   if (!SETTINGS_TABS.includes(tab)) tab = 'general';
@@ -562,7 +647,7 @@ async function renderSettings(tab = 'general') {
   const body = document.getElementById('set-body');
   const s = await api('GET', '/api/settings');
   if (route().page !== 'settings') return;
-  ({ general: settingsGeneral, updates: settingsUpdates, backups: settingsBackups, account: settingsAccount })[tab](body, s);
+  ({ general: settingsGeneral, domains: settingsDomains, updates: settingsUpdates, backups: settingsBackups, account: settingsAccount })[tab](body, s);
 }
 
 function settingsGeneral(body, s) {
@@ -725,6 +810,118 @@ function waitForRestart() {
     }
     if (Date.now() - started > 5 * 60e3) clearInterval(timer);
   }, 3000);
+}
+
+async function settingsDomains(body) {
+  let d;
+  try {
+    d = await api('GET', '/api/domains');
+  } catch (err) {
+    body.innerHTML = errorBox(err);
+    return;
+  }
+  if (route().page !== 'settings') return;
+  const st = d.status || {};
+  const statusBox = !st.enabled ? '' : `
+    <div class="card">
+      <h2>${t('dom.status')}</h2>
+      <div class="kv">
+        <span>Caddy</span><strong>${st.running ? '✓ ' + t('dom.running') : '✕ ' + t('dom.stopped')}</strong>
+        <span>${t('dom.cert')}</span><strong>${st.certificate ? `✓ *.${esc(st.domain)}` : t('dom.certWaiting')}</strong>
+      </div>
+      ${st.errors?.length ? `<div class="notice error">${st.errors.map(esc).join('\n')}</div>` : ''}
+      <p class="hint">${t('dom.dnsRecord', { domain: esc(st.domain) })}</p>
+      <button type="button" class="btn small" id="dom-refresh">${t('logs.refresh')}</button>
+    </div>`;
+
+  const providerOptions = [
+    `<option value="">${t('dom.chooseProvider')}</option>`,
+    ...d.providers.map((p) => `<option value="${esc(p.id)}" ${p.id === d.dnsProvider ? 'selected' : ''}>${esc(p.name)}</option>`),
+    `<option value="internal" ${d.dnsProvider === 'internal' ? 'selected' : ''}>${t('dom.internal')}</option>`,
+  ].join('');
+
+  body.innerHTML = `
+    ${statusBox}
+    <form class="card" id="dom-form">
+      <h2>${t('dom.title')}</h2>
+      <p class="hint" style="margin-top:-4px">${t('dom.lead')}</p>
+      <div class="field"><label for="dom-domain">${t('dom.domain')}</label>
+        <input type="text" id="dom-domain" value="${esc(d.domain)}" placeholder="home.example.com" autocapitalize="off" autocomplete="off">
+        <p class="hint">${t('dom.domainHint')}</p></div>
+      <div class="field"><label for="dom-provider">${t('dom.provider')}</label>
+        <select id="dom-provider" class="lang">${providerOptions}</select></div>
+      <div id="dom-fields"></div>
+      <div class="field"><label for="dom-email">${t('dom.email')} <span class="hint">${t('new.envOptional')}</span></label>
+        <input type="text" id="dom-email" value="${esc(d.acmeEmail)}" placeholder="you@example.com" autocapitalize="off"></div>
+      <div class="field"><label for="dom-panel">${t('dom.panelSub')} <span class="hint">${t('new.envOptional')}</span></label>
+        <input type="text" id="dom-panel" value="${esc(d.panelSubdomain)}" placeholder="moorline" autocapitalize="off">
+        <p class="hint">${t('dom.panelSubHint')}</p></div>
+      <details class="field"><summary>${t('dom.advanced')}</summary>
+        <div class="row" style="margin-top:10px">
+          <div style="flex:1;min-width:120px"><label for="dom-http">HTTP</label><input type="number" id="dom-http" value="${esc(d.httpPort)}"></div>
+          <div style="flex:1;min-width:120px"><label for="dom-https">HTTPS</label><input type="number" id="dom-https" value="${esc(d.httpsPort)}"></div>
+        </div>
+        <p class="hint">${t('dom.portsHint')}</p>
+      </details>
+      <div id="dom-out"></div>
+      <button class="btn primary">${t('dom.saveApply')}</button>
+    </form>
+    <div id="dom-op" hidden><pre class="terminal" id="dom-term"></pre></div>`;
+
+  const drawFields = () => {
+    const id = document.getElementById('dom-provider').value;
+    const p = d.providers.find((x) => x.id === id);
+    const box = document.getElementById('dom-fields');
+    if (id === 'internal') {
+      box.innerHTML = `<p class="hint field">${t('dom.internalHint')}</p>`;
+      return;
+    }
+    if (!p) { box.innerHTML = ''; return; }
+    const help = p.help?.[lang] || p.help?.en || '';
+    box.innerHTML = `
+      ${help ? `<p class="hint field">${esc(help)}</p>` : ''}
+      ${p.fields.map((f) => {
+        const saved = id === d.dnsProvider ? d.credentials?.[f.key] || '' : '';
+        return `<div class="field"><label for="dns-${esc(f.key)}">${esc(f.label)}${f.required ? '' : ` <span class="hint">${t('new.envOptional')}</span>`}</label>
+          <input type="${f.secret ? 'password' : 'text'}" id="dns-${esc(f.key)}" data-key="${esc(f.key)}" class="dns-field"
+            value="${f.secret ? '' : esc(saved || f.default || '')}" placeholder="${esc(f.secret && saved ? saved : f.placeholder || '')}" autocomplete="off" autocapitalize="off"></div>`;
+      }).join('')}`;
+  };
+  drawFields();
+  document.getElementById('dom-provider').addEventListener('change', drawFields);
+  document.getElementById('dom-refresh')?.addEventListener('click', () => settingsDomains(body));
+
+  document.getElementById('dom-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const out = document.getElementById('dom-out');
+    const credentials = {};
+    document.querySelectorAll('.dns-field').forEach((el) => { credentials[el.dataset.key] = el.value; });
+    try {
+      await api('PUT', '/api/domains', {
+        domain: document.getElementById('dom-domain').value,
+        dnsProvider: document.getElementById('dom-provider').value,
+        acmeEmail: document.getElementById('dom-email').value,
+        panelSubdomain: document.getElementById('dom-panel').value,
+        httpPort: Number(document.getElementById('dom-http').value),
+        httpsPort: Number(document.getElementById('dom-https').value),
+        credentials,
+      });
+      out.innerHTML = '';
+    } catch (err) {
+      out.innerHTML = errorBox(err);
+      return;
+    }
+    const wrap = document.getElementById('dom-op');
+    const pre = document.getElementById('dom-term');
+    wrap.hidden = false;
+    pre.textContent = '';
+    const code = await stream('POST', '/api/domains/apply', (txt) => appendTo(pre, txt)).catch((err) => {
+      appendTo(pre, `\n${err.message}\n`);
+      return 1;
+    });
+    toast(t(code === 0 ? 'toast.done' : 'toast.failed'));
+    if (code === 0) setTimeout(() => { if (route().tab === 'domains') settingsDomains(body); }, 8000);
+  });
 }
 
 function settingsBackups(body) {

@@ -181,3 +181,17 @@ td code { font-size: 12.5px; }
   textarea.code { min-height: 300px; }
   .hide-mobile { display: none; }
 }
+
+/* ---------- domains ---------- */
+.route-row { display: grid; grid-template-columns: minmax(0, 3fr) minmax(110px, 1fr) 100px auto; gap: 8px; align-items: center; margin-bottom: 8px; }
+.route-host { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.route-host input { min-width: 70px; flex: 1; }
+.route-host span { color: var(--muted); font-size: 14px; white-space: nowrap; flex: none; }
+.route-row select.lang { width: 100%; min-height: 38px; }
+details > summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+@media (max-width: 760px) {
+  .route-row { grid-template-columns: 1fr 1fr; }
+  .route-host { grid-column: 1 / -1; }
+}
+
+.card > p.hint { margin-bottom: 14px; }

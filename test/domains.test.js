@@ -1,0 +1,40 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { PROVIDERS, providerJson } from '../src/dns-providers.js';
+import { initSecrets, encrypt, decrypt, mask } from '../src/secrets.js';
+
+test('every provider is built into the Caddy image', () => {
+  const dockerfile = fs.readFileSync(new URL('../caddy/Dockerfile', import.meta.url), 'utf8');
+  for (const p of PROVIDERS) assert.ok(dockerfile.includes(`--with ${p.module}`), p.id);
+  assert.equal(new Set(PROVIDERS.map((p) => p.id)).size, PROVIDERS.length);
+});
+
+test('provider JSON for Caddy', () => {
+  assert.deepEqual(providerJson('cloudflare', { api_token: 'abc' }), { name: 'cloudflare', api_token: 'abc' });
+  assert.deepEqual(providerJson('godaddy', { key: 'K', secret: 'S' }), { name: 'godaddy', api_token: 'K:S' });
+  assert.deepEqual(providerJson('route53', { access_key_id: 'A', secret_access_key: 'B' }),
+    { name: 'route53', access_key_id: 'A', secret_access_key: 'B' });
+  assert.equal(providerJson('nope', {}), null);
+});
+
+test('every provider has help in both languages', () => {
+  for (const p of PROVIDERS) {
+    assert.ok(p.help.en && p.help.pl, p.id);
+    assert.ok(p.fields.length > 0, p.id);
+  }
+});
+
+test('secrets are encrypted and can be read back', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'moorline-'));
+  initSecrets(dir);
+  const blob = encrypt({ api_token: 'top-secret-1234' });
+  assert.ok(!blob.includes('top-secret'));
+  assert.deepEqual(decrypt(blob), { api_token: 'top-secret-1234' });
+  assert.equal(decrypt('v1:broken'), null);
+  assert.equal(mask('top-secret-1234'), '••••••1234');
+  assert.equal(fs.statSync(path.join(dir, 'secret.key')).mode & 0o777, 0o600);
+  fs.rmSync(dir, { recursive: true, force: true });
+});

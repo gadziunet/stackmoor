@@ -13,6 +13,8 @@ import { i18nMiddleware, translateAll } from './i18n.js';
 import { stacksDirMounted } from './mounts.js';
 import { createUpdates } from './updates.js';
 import { VERSION } from './version.js';
+import { initSecrets } from './secrets.js';
+import { createDomains } from './domains.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -27,6 +29,7 @@ fs.mkdirSync(config.dataDir, { recursive: true });
 fs.mkdirSync(config.stacksDir, { recursive: true });
 
 const db = openDb(path.join(config.dataDir, 'panel.db'));
+initSecrets(config.dataDir);
 const stacksDirOk = stacksDirMounted(config.stacksDir);
 if (!stacksDirOk) {
   console.warn(`WARNING: ${config.stacksDir} is not mounted from the host – mount it at the same path and set STACKS_DIR.`);
@@ -34,6 +37,11 @@ if (!stacksDirOk) {
 const stacks = createStacks({ db, stacksDir: config.stacksDir, getSettings: () => getSettings(db) });
 const updates = createUpdates({ db, stacks, getSettings: () => getSettings(db) });
 updates.startScheduler();
+const domains = createDomains({
+  db, stacks, stacksDir: config.stacksDir,
+  getSettings: () => getSettings(db),
+  saveSettings: (patch) => saveSettings(db, patch),
+});
 
 const app = express();
 app.disable('x-powered-by');
@@ -212,7 +220,64 @@ app.delete('/api/stacks/:name', wrap(async (req, res) => {
   if (req.body?.confirm !== req.params.name) return fail(req, res, 400, 'delete.confirm');
   const lines = [];
   await stacks.remove(req.params.name, (s) => lines.push(s), req.t);
+  if (domains.routes(req.params.name).length) {
+    domains.removeStack(req.params.name);
+    if (getSettings(db).domain) await domains.apply(() => {}, req.t).catch(() => {});
+  }
   res.json({ ok: true, output: lines.join('') });
+}));
+
+// ---------- domains ----------
+
+app.get('/api/domains', wrap(async (_req, res) => {
+  res.json({ ...domains.publicConfig(), status: await domains.status() });
+}));
+
+app.put('/api/domains', wrap(async (req, res) => {
+  domains.saveConfig(req.body || {});
+  res.json(domains.publicConfig());
+}));
+
+app.post('/api/domains/apply', wrap(async (req, res) => {
+  const write = openStream(res);
+  let ok = true;
+  await domains.apply(write, req.t).catch((err) => {
+    ok = false;
+    write(`\n${req.t('log.error', { message: errorText(req, err) })}\n`);
+  });
+  write(`\n__EXIT__:${ok ? 0 : 1}\n`);
+  res.end();
+}));
+
+app.get('/api/domains/status', wrap(async (_req, res) => res.json(await domains.status())));
+
+app.get('/api/stacks/:name/routes', wrap(async (req, res) => {
+  stacks.assertName(req.params.name);
+  const cfg = await stacks.config(req.params.name);
+  const services = Object.entries(cfg.services || {}).map(([name, def]) => ({
+    name,
+    ports: [...new Set([
+      ...(def.ports || []).map((p) => Number(p.target)),
+      ...(def.expose || []).map((p) => Number(String(p).split('/')[0])),
+    ].filter(Boolean))],
+    hostNetwork: Boolean(def.network_mode),
+  }));
+  const s = getSettings(db);
+  res.json({ domain: s.domain, routes: domains.routes(req.params.name), services });
+}));
+
+app.put('/api/stacks/:name/routes', wrap(async (req, res) => {
+  stacks.assertName(req.params.name);
+  await domains.setRoutes(req.params.name, req.body?.routes);
+  let log = '';
+  let applied = true;
+  if (getSettings(db).domain) {
+    await domains.apply((s) => { log += s; }, req.t).catch((err) => {
+      applied = false;
+      log += `\n${req.t('log.error', { message: errorText(req, err) })}\n`;
+    });
+  }
+  res.json({ routes: domains.routes(req.params.name), applied, log });
 }));
 
 app.get('/api/stacks/:name/operations', wrap(async (req, res) => {

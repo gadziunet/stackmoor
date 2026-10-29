@@ -41,6 +41,16 @@ const MIGRATIONS = [
     value TEXT NOT NULL
   );
   `,
+  `
+  CREATE TABLE routes (
+    id        INTEGER PRIMARY KEY,
+    stack     TEXT NOT NULL,
+    subdomain TEXT NOT NULL UNIQUE,
+    service   TEXT NOT NULL,
+    port      INTEGER NOT NULL
+  );
+  CREATE INDEX routes_stack ON routes(stack);
+  `,
 ];
 
 export const DEFAULT_SETTINGS = {
@@ -54,6 +64,13 @@ export const DEFAULT_SETTINGS = {
   updateCheck: true,
   updateInterval: 'daily', // 'daily' | 'weekly'
   updateCheckStacks: true,
+  // Local domains through Caddy. Empty domain = feature off.
+  domain: '',            // e.g. local.example.com -> apps get <name>.local.example.com
+  dnsProvider: '',       // provider id from dns-providers.js, or 'internal' for a self-signed CA
+  acmeEmail: '',
+  httpPort: 80,
+  httpsPort: 443,
+  panelSubdomain: '',    // e.g. "moorline" -> the panel itself at moorline.<domain>
 };
 
 export function openDb(file) {

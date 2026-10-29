@@ -57,10 +57,18 @@ export function createStacks({ db, stacksDir, getSettings }) {
     return row ? row.auto_volumes === 1 : true;
   }
 
-  const base = (name, file) => [
-    'compose', '--ansi', 'never', '--progress', 'plain',
-    '-p', name, '--project-directory', stackDir(name), '-f', file,
-  ];
+  // Moorline-generated additions (e.g. joining the "moorline" network for domains)
+  // live in a separate override file, so the user's compose.yaml stays untouched.
+  const OVERRIDE = 'compose.moorline.yaml';
+  const base = (name, file) => {
+    const args = [
+      'compose', '--ansi', 'never', '--progress', 'plain',
+      '-p', name, '--project-directory', stackDir(name), '-f', file,
+    ];
+    const override = path.join(stackDir(name), OVERRIDE);
+    if (fs.existsSync(override)) args.push('-f', override);
+    return args;
+  };
 
   // ---------- read ----------
 
@@ -251,6 +259,11 @@ export function createStacks({ db, stacksDir, getSettings }) {
     if (missingFiles.length) throw new UserError('files.missing', { list: missingFiles.join('\n') });
 
     await checkPorts(name, cfg);
+    // Stacks with a domain join the shared "moorline" network; make sure it exists.
+    if (fs.existsSync(path.join(dir, OVERRIDE))) {
+      const net = await docker(['network', 'inspect', 'moorline']);
+      if (net.code !== 0) await docker(['network', 'create', 'moorline']);
+    }
     return file;
   }
 
@@ -374,5 +387,10 @@ export function createStacks({ db, stacksDir, getSettings }) {
       .map(([svc, def]) => ({ svc, image: def.image }));
   }
 
-  return { list, get, save, action, logs, remove, operations, operationOutput, assertName, images };
+  // Resolved config of a stack (with variables and the override applied).
+  async function config(name) {
+    return resolvedConfig(name, requireStack(name));
+  }
+
+  return { list, get, save, action, logs, remove, operations, operationOutput, assertName, images, config, stackDir };
 }

@@ -49,10 +49,20 @@ After saving, the panel shows exactly what it changed. Folders are created befor
 
 Automatic volumes can be turned off per stack.
 
+## Local domains
+
+Give every stack an address like `cloud.home.example.com` with a real HTTPS certificate – no ports to remember, and the server does not have to be reachable from the internet.
+
+1. **Settings → Domains:** enter your domain, pick your DNS provider (Cloudflare, Bunny, OVHcloud, Hetzner, DigitalOcean, Porkbun, Namecheap, GoDaddy, IONOS, netcup, Gandi, AWS Route 53, deSEC, DuckDNS) and paste its API key. Keys are stored encrypted.
+2. In your DNS create an A record `*.home.example.com` → the server's IP (a local IP is fine).
+3. **Stack → Domain:** choose a subdomain, the service and its port inside the container.
+
+Moorline runs Caddy in its own container (`moorline-caddy`) with one wildcard certificate for all apps. The DNS provider can be changed any time in Settings. On Unraid, ports 80/443 are used by its web UI – choose other ports under *Advanced*.
+
 ## Roadmap
 
 - [x] Stacks, editor, automatic volumes, logs
-- [ ] Local domains through Caddy (API, wildcard certificates via DNS-01 or `tls internal`)
+- [x] Local domains through Caddy – wildcard certificate via your DNS provider's API (14 providers) or an internal CA
 - [ ] Cloudron-style backups – per stack, automatically before updates, database dumps, schedule, retention, encryption; restic to S3 / Backblaze B2; restore and clone
 - [ ] Setup wizard: fresh install or restore everything from a backup
 - [ ] Updates: check for new Moorline versions and new stack images (on/off in Settings), show what is new and update only after confirmation

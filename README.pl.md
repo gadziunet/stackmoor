@@ -58,10 +58,20 @@ Automatyczne wolumeny można wyłączyć dla wybranego stacka.
 
 Stack można utworzyć w istniejącym folderze bez `compose.yaml`, więc dane możesz wgrać wcześniej.
 
+## Domeny lokalne
+
+Każdy stack może dostać adres typu `chmura.dom.example.com` z prawdziwym certyfikatem HTTPS – bez pamiętania portów i bez wystawiania serwera do internetu.
+
+1. **Ustawienia → Domeny:** wpisz domenę, wybierz dostawcę DNS (Cloudflare, Bunny, OVHcloud, Hetzner, DigitalOcean, Porkbun, Namecheap, GoDaddy, IONOS, netcup, Gandi, AWS Route 53, deSEC, DuckDNS) i wklej klucz API. Klucze są zapisywane w formie zaszyfrowanej.
+2. W DNS utwórz rekord A `*.dom.example.com` → adres IP serwera (lokalny adres jest w porządku).
+3. **Stack → Domena:** wybierz subdomenę, usługę i jej port w kontenerze.
+
+Moorline uruchamia Caddy we własnym kontenerze (`moorline-caddy`) z jednym certyfikatem wildcard dla wszystkich aplikacji. Dostawcę DNS można zmienić w każdej chwili w Ustawieniach. Na Unraid porty 80/443 zajmuje jego panel – wybierz inne w sekcji *Zaawansowane*.
+
 ## Plan
 
 - [x] Stacki, edytor, automatyczne wolumeny, logi
-- [ ] Domeny lokalne przez Caddy (API, certyfikaty wildcard przez DNS-01 albo `tls internal`)
+- [x] Domeny lokalne przez Caddy – certyfikat wildcard przez API dostawcy DNS (14 dostawców) albo wewnętrzny CA
 - [ ] Backupy jak w Cloudronie – per stack, automatycznie przed aktualizacją, dumpy baz, harmonogram, retencja, szyfrowanie; restic do S3 / Backblaze B2; przywracanie i klonowanie
 - [ ] Kreator: nowa instalacja albo przywrócenie wszystkiego z backupu
 - [ ] Aktualizacje: sprawdzanie nowych wersji Moorline i nowych obrazów stacków (włączane w Ustawieniach), pokazanie co nowego i aktualizacja dopiero po potwierdzeniu

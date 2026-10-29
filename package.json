@@ -1,6 +1,6 @@
 {
   "name": "moorline",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Simple web UI for Docker Compose stacks with automatic volumes.",
   "type": "module",
   "main": "src/server.js",
