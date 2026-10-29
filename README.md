@@ -87,6 +87,12 @@ install.sh     – installer / updater
 
 Translations: add a language block to `src/i18n.js` and `public/i18n.js` – tests check that every language has all keys.
 
+## How it's made
+
+Moorline is written with the help of AI – [Claude](https://claude.ai) by Anthropic. I design the features, review the changes and test every release myself on real servers (Debian and Unraid) before publishing it. The code is covered by automated tests that run on every push.
+
+If you find a bug, please [open an issue](https://github.com/gadziunet/moorline/issues).
+
 ## License
 
 [AGPL-3.0](LICENSE) © Gadziunet. You may use, modify and share Moorline freely; if you distribute a modified version or offer it as a network service, you must publish your changes under the same license.

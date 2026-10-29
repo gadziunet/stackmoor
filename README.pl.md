@@ -78,6 +78,12 @@ Wymaga Node 20+ oraz `docker` z wtyczką `compose`. Albo przez Dockera: `docker 
 
 Tłumaczenia: dopisz blok języka w `src/i18n.js` i `public/i18n.js` – testy sprawdzają, czy każdy język ma wszystkie klucze.
 
+## Jak powstaje
+
+Moorline jest pisany z pomocą AI – [Claude](https://claude.ai) od Anthropic. Ja projektuję funkcje, przeglądam zmiany i każde wydanie sam testuję na prawdziwych serwerach (Debian i Unraid), zanim je opublikuję. Kod jest objęty testami automatycznymi uruchamianymi przy każdym pushu.
+
+Jeśli znajdziesz błąd, [zgłoś go tutaj](https://github.com/gadziunet/moorline/issues).
+
 ## Licencja
 
 [AGPL-3.0](LICENSE) © Gadziunet. Możesz używać, zmieniać i udostępniać Moorline za darmo; jeśli rozpowszechniasz zmienioną wersję albo udostępniasz ją jako usługę w sieci, musisz opublikować swoje zmiany na tej samej licencji.
