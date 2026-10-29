@@ -15,6 +15,7 @@ import { createUpdates } from './updates.js';
 import { VERSION } from './version.js';
 import { initSecrets } from './secrets.js';
 import { createDomains } from './domains.js';
+import { createPanelLock } from './panel-lock.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -48,6 +49,13 @@ app.disable('x-powered-by');
 app.set('trust proxy', 'loopback, linklocal, uniquelocal');
 app.use(express.json({ limit: '1mb' }));
 app.use(i18nMiddleware);
+
+// ---------- panel only through its domain (like Cloudron) ----------
+domains.attachSelf().catch(() => {}).then(() => domains.refreshCaddyIp()).catch(() => {});
+const panelLock = createPanelLock({ getSettings: () => getSettings(db), domains });
+setInterval(() => { if (panelLock.lockedHost()) domains.refreshCaddyIp().catch(() => {}); }, 60_000).unref();
+app.use(panelLock.middleware);
+
 app.use(sessionMiddleware(db));
 app.use('/api', requireAppHeader);
 
@@ -234,7 +242,7 @@ app.get('/api/domains', wrap(async (_req, res) => {
 }));
 
 app.put('/api/domains', wrap(async (req, res) => {
-  domains.saveConfig(req.body || {});
+  domains.saveConfig(req.body || {}, req.hostname);
   res.json(domains.publicConfig());
 }));
 

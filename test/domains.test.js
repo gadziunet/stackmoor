@@ -38,3 +38,17 @@ test('secrets are encrypted and can be read back', () => {
   assert.equal(fs.statSync(path.join(dir, 'secret.key')).mode & 0o777, 0o600);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('certificate errors: only after the last success, never "context canceled"', async () => {
+  const { certErrors } = await import('../src/caddy-logs.js');
+  const line = (o) => JSON.stringify(o);
+  const logs = [
+    line({ level: 'error', msg: 'could not get certificate from issuer', error: 'old failure' }),
+    line({ level: 'info', msg: 'certificate obtained successfully', identifier: '*.dom.example.com' }),
+    line({ level: 'error', msg: 'job failed', error: 'provisioning client: context canceled' }),
+    'not json',
+  ].join('\n');
+  assert.deepEqual(certErrors(logs), []);
+  const failing = `${logs}\n${line({ level: 'error', msg: 'job failed', error: 'DNS: unauthorized' })}`;
+  assert.deepEqual(certErrors(failing), ['job failed: DNS: unauthorized']);
+});

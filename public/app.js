@@ -45,6 +45,8 @@ async function api(method, url, body) {
     state.user = null;
     render();
   }
+  // The panel was locked to its domain while this tab used the IP address.
+  if (res.status === 421 && data.redirect) location.href = data.redirect + location.hash;
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
 }
@@ -832,6 +834,7 @@ async function settingsDomains(body) {
       <div class="kv">
         <span>Caddy</span><strong>${st.running ? '✓ ' + t('dom.running') : '✕ ' + t('dom.stopped')}</strong>
         <span>${t('dom.cert')}</span><strong>${st.certificate ? `✓ *.${esc(st.domain)}` : t('dom.certWaiting')}</strong>
+        ${st.panelUrl ? `<span>${t('dom.panelUrl')}</span><a href="${esc(st.panelUrl)}">${esc(st.panelUrl.replace('https://', ''))}</a>` : ''}
       </div>
       ${st.errors?.length ? `<div class="notice error">${st.errors.map(esc).join('\n')}</div>` : ''}
       <p class="hint">${t('dom.dnsRecord', { domain: esc(st.domain) })}</p>
@@ -852,14 +855,15 @@ async function settingsDomains(body) {
       <div class="field"><label for="dom-domain">${t('dom.domain')}</label>
         <input type="text" id="dom-domain" value="${esc(d.domain)}" placeholder="home.example.com" autocapitalize="off" autocomplete="off">
         <p class="hint">${t('dom.domainHint')}</p></div>
+      <div class="field"><label for="dom-panel">${t('dom.panelSub')} <span class="hint">${t('new.envOptional')}</span></label>
+        <input type="text" id="dom-panel" value="${esc(d.panelSubdomain)}" placeholder="stackmoor" autocapitalize="off" autocomplete="off">
+        <p class="hint">${t('dom.panelSubHint')}</p>
+        <div id="dom-lock"></div></div>
       <div class="field"><label for="dom-provider">${t('dom.provider')}</label>
         <select id="dom-provider" class="lang">${providerOptions}</select></div>
       <div id="dom-fields"></div>
       <div class="field"><label for="dom-email">${t('dom.email')} <span class="hint">${t('new.envOptional')}</span></label>
         <input type="text" id="dom-email" value="${esc(d.acmeEmail)}" placeholder="you@example.com" autocapitalize="off"></div>
-      <div class="field"><label for="dom-panel">${t('dom.panelSub')} <span class="hint">${t('new.envOptional')}</span></label>
-        <input type="text" id="dom-panel" value="${esc(d.panelSubdomain)}" placeholder="stackmoor" autocapitalize="off">
-        <p class="hint">${t('dom.panelSubHint')}</p></div>
       <details class="field"><summary>${t('dom.advanced')}</summary>
         <div class="row" style="margin-top:10px">
           <div style="flex:1;min-width:120px"><label for="dom-http">HTTP</label><input type="number" id="dom-http" value="${esc(d.httpPort)}"></div>
@@ -893,6 +897,25 @@ async function settingsDomains(body) {
   };
   drawFields();
   document.getElementById('dom-provider').addEventListener('change', drawFields);
+
+  // The IP lock can only be switched on from the panel's own address (proof that it works).
+  const drawLock = () => {
+    const box = document.getElementById('dom-lock');
+    const domain = document.getElementById('dom-domain').value.trim().toLowerCase();
+    const sub = document.getElementById('dom-panel').value.trim().toLowerCase();
+    if (!domain || !sub) { box.innerHTML = ''; return; }
+    const url = `https://${sub}.${domain}`;
+    const here = location.hostname === `${sub}.${domain}`;
+    const prev = document.getElementById('dom-lock-on');
+    const checked = prev ? prev.checked : d.panelDomainOnly;
+    box.innerHTML = `
+      <label class="check" style="margin-top:10px"><input type="checkbox" id="dom-lock-on" ${checked && (here || d.panelDomainOnly) ? 'checked' : ''} ${here || d.panelDomainOnly ? '' : 'disabled'}>
+        ${t('dom.lock')}</label>
+      <p class="hint">${here || d.panelDomainOnly ? t('dom.lockHint') : t('dom.lockOpenFirst', { url: esc(url) })}</p>`;
+  };
+  drawLock();
+  document.getElementById('dom-domain').addEventListener('input', drawLock);
+  document.getElementById('dom-panel').addEventListener('input', drawLock);
   document.getElementById('dom-refresh')?.addEventListener('click', () => settingsDomains(body));
 
   document.getElementById('dom-form').addEventListener('submit', async (e) => {
@@ -906,6 +929,7 @@ async function settingsDomains(body) {
         dnsProvider: document.getElementById('dom-provider').value,
         acmeEmail: document.getElementById('dom-email').value,
         panelSubdomain: document.getElementById('dom-panel').value,
+        panelDomainOnly: Boolean(document.getElementById('dom-lock-on')?.checked),
         httpPort: Number(document.getElementById('dom-http').value),
         httpsPort: Number(document.getElementById('dom-https').value),
         credentials,

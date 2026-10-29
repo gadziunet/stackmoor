@@ -8,6 +8,7 @@ import { UserError } from './errors.js';
 import { encrypt, decrypt, mask } from './secrets.js';
 import { PROVIDERS, providerById, providerJson } from './dns-providers.js';
 import { publishedPorts, findConflicts } from './ports.js';
+import { certErrors } from './caddy-logs.js';
 
 // Local domains: one Caddy container ("stackmoor-caddy") in front of all stacks.
 // - It holds one wildcard certificate (*.domain) obtained through the DNS provider's API,
@@ -57,12 +58,24 @@ export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings
       httpPort: s.httpPort,
       httpsPort: s.httpsPort,
       panelSubdomain: s.panelSubdomain,
+      panelDomainOnly: Boolean(s.panelDomainOnly && s.domain && s.panelSubdomain),
+      panelUrl: panelUrl(s),
       credentials: masked,
       providers: PROVIDERS.map(({ id, name, fields, help }) => ({ id, name, fields, help })),
     };
   }
 
-  function saveConfig(body) {
+  function panelUrl(s = getSettings()) {
+    if (!s.domain || !s.panelSubdomain) return '';
+    return `https://${s.panelSubdomain}.${s.domain}${s.httpsPort === 443 ? '' : `:${s.httpsPort}`}`;
+  }
+
+  /**
+   * @param body  settings from the UI
+   * @param currentHost  the host the user opened the panel with – the IP lock may only be
+   *   turned on from the panel's own address, which proves that address works.
+   */
+  function saveConfig(body, currentHost = '') {
     const domain = String(body.domain ?? '').trim().toLowerCase().replace(/^\*\./, '').replace(/\.$/, '');
     if (domain && !DOMAIN_RE.test(domain)) throw new UserError('dns.badDomain', { domain });
 
@@ -100,7 +113,11 @@ export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings
       if (v) next[f.key] = v;
     }
     setState(db, 'dns.credentials', encrypt(next));
-    saveSettings({ domain, dnsProvider: provider, acmeEmail: email, httpPort, httpsPort, panelSubdomain });
+    const panelDomainOnly = Boolean(body.panelDomainOnly) && Boolean(domain && panelSubdomain);
+    if (panelDomainOnly && String(currentHost).toLowerCase() !== `${panelSubdomain}.${domain}`) {
+      throw new UserError('dns.lockNeedsDomain', { url: `https://${panelSubdomain}.${domain}` });
+    }
+    saveSettings({ domain, dnsProvider: provider, acmeEmail: email, httpPort, httpsPort, panelSubdomain, panelDomainOnly });
   }
 
   // ---------- routes ----------
@@ -304,13 +321,47 @@ export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings
     log(`$ docker compose -p ${CADDY} up -d\n`);
     const up = await docker([...composeArgs(), 'pull', '--quiet'], { onData: log });
     if (up.code !== 0) log(t('dns.log.pullFailed') + '\n');
+    const before = await containerId();
     const r = await docker([...composeArgs(), 'up', '-d', '--remove-orphans'], { onData: log });
     if (r.code !== 0) throw new UserError('step.exitCode', { code: r.code });
 
-    // `up` only recreates on compose changes – always reload the Caddy config itself.
-    const reload = await docker(['exec', CADDY, 'caddy', 'reload', '--config', '/etc/caddy/caddy.json', '--force'], { onData: log });
-    if (reload.code !== 0) throw new UserError('dns.reloadFailed');
+    // A freshly (re)created container has just read the config – reloading it right away
+    // would cancel the certificate request it started. Otherwise reload; without --force
+    // Caddy ignores an unchanged config, so a running certificate request keeps going.
+    if (before && before === await containerId()) {
+      const reload = await docker(['exec', CADDY, 'caddy', 'reload', '--config', '/etc/caddy/caddy.json'], { onData: log });
+      if (reload.code !== 0) throw new UserError('dns.reloadFailed');
+    }
+    refreshCaddyIp();
     log(t('dns.log.applied') + '\n');
+  }
+
+  /** On start: a recreated panel container (e.g. after an update) has left the shared network. */
+  async function attachSelf() {
+    if (!getSettings().domain) return;
+    const self = await selfContainer();
+    if (!self) return;
+    await ensureNetwork();
+    const r = await docker(['inspect', '--format', '{{json .NetworkSettings.Networks}}', self]);
+    if (r.code === 0 && !(NETWORK in (JSON.parse(r.stdout || '{}') || {}))) {
+      await docker(['network', 'connect', NETWORK, self]);
+    }
+  }
+
+  async function containerId() {
+    const r = await docker(['inspect', '--format', '{{.Id}}', CADDY]);
+    return r.code === 0 ? r.stdout.trim() : null;
+  }
+
+  // Caddy's address on the shared network: with the IP lock on, only it may talk to the panel.
+  let caddyIp = null;
+  // Only when the panel itself runs in a container on that network (otherwise Caddy reaches it
+  // through host.docker.internal and the Host header is all we can check).
+  async function refreshCaddyIp() {
+    if (!await selfContainer()) { caddyIp = null; return null; }
+    const r = await docker(['inspect', '--format', `{{with index .NetworkSettings.Networks "${NETWORK}"}}{{.IPAddress}}{{end}}`, CADDY]);
+    caddyIp = r.code === 0 && r.stdout.trim() ? r.stdout.trim() : null;
+    return caddyIp;
   }
 
   /** Is Caddy running, is there a certificate, and the latest certificate errors. */
@@ -324,15 +375,14 @@ export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings
     if (running) {
       const ls = await docker(['exec', CADDY, 'sh', '-c', 'ls -1 /data/caddy/certificates/*/ 2>/dev/null']);
       certificate = ls.stdout.split('\n').some((d) => d.trim() === `wildcard_.${s.domain}`);
-      const logs = await docker(['logs', '--since', '30m', '--tail', '300', CADDY]);
-      errors = logs.output.split('\n')
-        .map((l) => { try { return JSON.parse(l); } catch { return null; } })
-        .filter((l) => l && l.level === 'error')
-        .slice(-3)
-        .map((l) => [l.msg, l.error].filter(Boolean).join(': ').slice(0, 500));
+      const logs = await docker(['logs', '--since', '24h', '--tail', '500', CADDY]);
+      errors = certErrors(logs.output);
     }
-    return { enabled: true, running, certificate, errors, domain: s.domain };
+    return { enabled: true, running, certificate, errors, domain: s.domain, panelUrl: panelUrl(s) };
   }
 
-  return { publicConfig, saveConfig, routes, setRoutes, removeStack, writeOverride, apply, status, buildConfig };
+  return {
+    publicConfig, saveConfig, routes, setRoutes, removeStack, writeOverride, apply, status, buildConfig,
+    panelUrl, refreshCaddyIp, attachSelf, caddyIp: () => caddyIp,
+  };
 }
