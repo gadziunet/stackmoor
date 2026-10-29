@@ -1,9 +1,9 @@
 import crypto from 'node:crypto';
 
-const COOKIE = 'sp_session';
+const COOKIE = 'ml_session';
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
-// --- hasła (scrypt z biblioteki standardowej, bez dodatkowych zależności) ---
+// --- passwords (scrypt from the standard library, no extra dependencies) ---
 
 export function hashPassword(password) {
   const salt = crypto.randomBytes(16);
@@ -21,7 +21,7 @@ export function verifyPassword(password, stored) {
   return crypto.timingSafeEqual(expected, actual);
 }
 
-// Zwraca klucz tłumaczenia błędu albo null.
+// Returns an error translation key or null.
 export function validatePassword(password) {
   if (typeof password !== 'string' || password.length < 10) {
     return 'auth.passwordTooShort';
@@ -29,7 +29,7 @@ export function validatePassword(password) {
   return null;
 }
 
-// --- sesje w SQLite ---
+// --- sessions stored in SQLite ---
 
 function parseCookies(header = '') {
   const out = {};
@@ -85,17 +85,17 @@ export function requireAuth(req, res, next) {
   next();
 }
 
-// Dodatkowa ochrona przed CSRF: żądania zmieniające stan muszą mieć nagłówek,
-// którego przeglądarka nie doda sama przy wysłaniu formularza z obcej strony.
+// Extra CSRF protection: state-changing requests must carry a header that a browser
+// never adds on its own when a form is submitted from another site.
 export function requireAppHeader(req, res, next) {
   if (req.method === 'GET' || req.method === 'HEAD') return next();
-  if (req.get('X-Requested-With') !== 'stackpanel') {
+  if (req.get('X-Requested-With') !== 'moorline') {
     return res.status(403).json({ error: req.t('auth.badRequest') });
   }
   next();
 }
 
-// Prosty limit prób logowania: 10 na 15 minut z jednego adresu.
+// Simple login rate limit: 10 attempts per 15 minutes per address.
 const attempts = new Map();
 export function loginRateLimit(req, res, next) {
   const key = req.ip;

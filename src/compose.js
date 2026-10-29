@@ -1,13 +1,13 @@
-// Automatyczne wolumeny: każdy stack trzyma swoje dane w ./data/ obok compose.yaml.
+// Automatic volumes: every stack keeps its data in ./data/ next to compose.yaml.
 //
-// - wolumen anonimowy (`- /config`)              -> ./data/<serwis>-config:/config
-// - ścieżka hosta (`/opt/app:/config`)           -> ./data/<serwis>-config:/config
-// - wolumen nazwany (`db_data:/var/lib/mysql`)   -> ./data/db_data:/var/lib/mysql
-// - VOLUME z obrazu, nieopisany w compose        -> dopisywany przy uruchomieniu
+// - anonymous volume (`- /config`)               -> ./data/<service>-config:/config
+// - host path (`/opt/app:/config`)               -> ./data/<service>-config:/config
+// - named volume (`db_data:/var/lib/mysql`)      -> ./data/db_data:/var/lib/mysql
+// - image VOLUME not described in compose        -> added on start
 //
-// Nie ruszamy: ścieżek systemowych (docker.sock, /dev, /etc/localtime...),
-// ścieżek z listy dozwolonych (np. /mnt, /media), zmiennych ${...},
-// ścieżek względnych wewnątrz folderu stacka oraz wolumenów zewnętrznych.
+// Left untouched: system paths (docker.sock, /dev, /etc/localtime...),
+// allow-listed host paths (e.g. /mnt, /media), ${...} variables,
+// relative paths inside the stack folder and external volumes.
 
 import path from 'node:path';
 import { parseDocument, isMap, isSeq, isScalar } from 'yaml';
@@ -32,7 +32,7 @@ export const SYSTEM_PATHS = [
   '/tmp/.X11-unix',
 ];
 
-// Rozszerzenia, po których poznajemy, że w kontenerze montowany jest plik, a nie folder.
+// Extensions that tell us a single file (not a folder) is mounted in the container.
 const FILE_EXT = /\.(ya?ml|json|conf|cfg|cnf|ini|toml|env|txt|xml|js|mjs|php|py|sh|lua|properties|db|sqlite3?|pem|crt|key|html?)$/i;
 
 export function isFileLikeTarget(target) {
@@ -100,8 +100,8 @@ function serviceEntries(doc) {
 }
 
 /**
- * Przepina wolumeny do folderu stacka.
- * Zwraca { text, changes[], warnings[], changed }; changes/warnings to obiekty { key, vars } do tłumaczenia.
+ * Moves volumes into the stack folder.
+ * Returns { text, changes[], warnings[], changed }; changes/warnings are { key, vars } objects to translate.
  */
 export function normalizeCompose(text, { hostPathAllowlist = [] } = {}) {
   const doc = parseCompose(text);
@@ -121,7 +121,7 @@ export function normalizeCompose(text, { hostPathAllowlist = [] } = {}) {
     return { declared: true, special };
   };
 
-  // Decyzja dla pojedynczego montowania; zwraca nowe źródło albo null (bez zmian).
+  // Decides what to do with one mount; returns the new source or null (unchanged).
   const decide = (svc, source, target) => {
     const kind = classify(source);
     const label = source ? `${source}:${target}` : target;
@@ -166,7 +166,7 @@ export function normalizeCompose(text, { hostPathAllowlist = [] } = {}) {
     if (!isSeq(vols)) continue;
 
     for (const item of vols.items) {
-      // Składnia krótka: "źródło:cel[:tryb]"
+      // Short syntax: "source:target[:mode]"
       if (isScalar(item) && typeof item.value === 'string') {
         const { source, target, mode } = parseShort(item.value);
         const next = decide(svc, source, target);
@@ -177,7 +177,7 @@ export function normalizeCompose(text, { hostPathAllowlist = [] } = {}) {
         }
         continue;
       }
-      // Składnia długa: { type, source, target, ... }
+      // Long syntax: { type, source, target, ... }
       if (isMap(item)) {
         const type = item.get('type') ?? 'volume';
         if (type !== 'bind' && type !== 'volume') continue; // tmpfs, npipe, cluster...
@@ -188,14 +188,14 @@ export function normalizeCompose(text, { hostPathAllowlist = [] } = {}) {
           const before = source ? `${source}:${target}` : String(target);
           item.set('type', 'bind');
           item.set('source', next);
-          item.delete('volume'); // opcje typu "volume: nocopy" nie pasują do bind
+          item.delete('volume'); // options like "volume: nocopy" are invalid for bind mounts
           changes.push({ key: 'change.rewrite', vars: { svc, from: before, to: `${next}:${target}` } });
         }
       }
     }
   }
 
-  // Usuwamy z sekcji "volumes" wolumeny, które zamieniliśmy na foldery.
+  // Drop named volumes that were turned into folders from the top-level "volumes".
   if (isMap(topVolumes)) {
     for (const name of convertedNamed) {
       if (!keptNamed.has(name) && topVolumes.has(name)) topVolumes.delete(name);
@@ -208,8 +208,8 @@ export function normalizeCompose(text, { hostPathAllowlist = [] } = {}) {
 }
 
 /**
- * Dopisuje montowania dla ścieżek z instrukcji VOLUME w obrazie,
- * których compose nie opisuje. missing = { serwis: ['/data', ...] }.
+ * Adds mounts for image VOLUME paths that compose does not describe.
+ * missing = { service: ['/data', ...] }.
  */
 export function addImageVolumes(text, missing) {
   const doc = parseCompose(text);

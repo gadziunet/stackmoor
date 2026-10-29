@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { translate } from '../src/i18n.js';
 
-// Wyciąga klucze z bloku słownika "lang: { ... }" w pliku.
+// Extracts keys from a "lang: { ... }" dictionary block in a file.
 function keysOf(file, lang) {
   const src = fs.readFileSync(new URL(file, import.meta.url), 'utf8');
   const start = src.indexOf(`\n  ${lang}: {`);
@@ -12,7 +12,7 @@ function keysOf(file, lang) {
 }
 
 for (const file of ['../src/i18n.js', '../public/i18n.js']) {
-  test(`${file}: en i pl mają te same klucze`, () => {
+  test(`${file}: en and pl have the same keys`, () => {
     const en = keysOf(file, 'en');
     const pl = keysOf(file, 'pl');
     assert.ok(en.size > 10);
@@ -21,7 +21,7 @@ for (const file of ['../src/i18n.js', '../public/i18n.js']) {
   });
 }
 
-test('wszystkie klucze użyte w kodzie serwera istnieją', () => {
+test('every key used by the server exists', () => {
   const en = keysOf('../src/i18n.js', 'en');
   const used = new Set();
   for (const f of ['server.js', 'stacks.js', 'compose.js', 'auth.js']) {
@@ -33,7 +33,7 @@ test('wszystkie klucze użyte w kodzie serwera istnieją', () => {
   assert.deepEqual([...used].filter((k) => !en.has(k)), []);
 });
 
-test('wszystkie klucze użyte w interfejsie istnieją', () => {
+test('every key used by the UI exists', () => {
   const en = keysOf('../public/i18n.js', 'en');
   const src = fs.readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
   const used = [...src.matchAll(/\bt\('([\w.]+)'/g)].map((m) => m[1]);
@@ -45,7 +45,7 @@ test('wszystkie klucze użyte w interfejsie istnieją', () => {
   }
 });
 
-test('podstawianie zmiennych', () => {
+test('variable substitution', () => {
   assert.equal(translate('pl', 'step.exitCode', { code: 2 }), 'Polecenie zakończyło się kodem 2.');
   assert.equal(translate('en', 'step.exitCode', { code: 2 }), 'The command exited with code 2.');
   assert.equal(translate('xx', 'notFound'), 'Not found.');

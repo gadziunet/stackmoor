@@ -1,5 +1,5 @@
-// Komunikaty serwera w dwóch językach. Interfejs ma osobny słownik w public/i18n.js.
-// Aby dodać język: skopiuj blok "en", przetłumacz i dopisz kod do SUPPORTED.
+// Server messages. The UI has its own dictionary in public/i18n.js.
+// To add a language: copy the "en" block, translate it and add the code to SUPPORTED.
 
 export const SUPPORTED = ['en', 'pl'];
 
@@ -99,7 +99,7 @@ export function translate(lang, key, vars = {}) {
   return template.replace(/\{(\w+)\}/g, (_m, name) => (name in vars ? String(vars[name]) : `{${name}}`));
 }
 
-// Język z nagłówka X-Lang (wysyła go interfejs), potem Accept-Language, domyślnie angielski.
+// Language from the X-Lang header (sent by the UI), then Accept-Language, English by default.
 export function pickLang(req) {
   const explicit = String(req.get('X-Lang') || '').toLowerCase();
   if (SUPPORTED.includes(explicit)) return explicit;
@@ -117,5 +117,5 @@ export function i18nMiddleware(req, _res, next) {
   next();
 }
 
-// Zamienia listę {key, vars} (zmiany/ostrzeżenia z compose.js) na teksty.
+// Turns a list of {key, vars} (changes/warnings from compose.js) into text.
 export const translateAll = (t, list = []) => list.map((m) => (typeof m === 'string' ? m : t(m.key, m.vars)));

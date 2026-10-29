@@ -5,19 +5,19 @@ import { normalizeCompose, addImageVolumes, isFileLikeTarget } from '../src/comp
 
 const vols = (text, svc) => parse(text).services[svc].volumes;
 
-test('wolumen anonimowy trafia do ./data', () => {
+test('anonymous volume goes to ./data', () => {
   const r = normalizeCompose(`services:\n  app:\n    image: x\n    volumes:\n      - /config\n`);
   assert.deepEqual(vols(r.text, 'app'), ['./data/app-config:/config']);
   assert.equal(r.changes.length, 1);
 });
 
-test('ścieżka hosta jest przepinana, tryb :ro zostaje', () => {
+test('host path is moved, :ro mode is kept', () => {
   const r = normalizeCompose(`services:\n  web:\n    image: x\n    volumes:\n      - /portainer/Files/AppData/Config/web:/var/www/html:ro\n`);
   assert.deepEqual(vols(r.text, 'web'), ['./data/web-var-www-html:/var/www/html:ro']);
   assert.equal(r.warnings.length, 1);
 });
 
-test('wolumen nazwany staje się folderem i znika z sekcji volumes', () => {
+test('named volume becomes a folder and is removed from volumes', () => {
   const r = normalizeCompose(`services:
   db:
     image: postgres
@@ -36,7 +36,7 @@ volumes:
   assert.equal(doc.volumes, undefined);
 });
 
-test('wolumen zewnętrzny zostaje bez zmian', () => {
+test('external volume is left unchanged', () => {
   const r = normalizeCompose(`services:
   app:
     image: x
@@ -52,7 +52,7 @@ volumes:
   assert.equal(r.changes.length, 0);
 });
 
-test('ścieżki systemowe, dozwolone, względne i ze zmiennymi zostają', () => {
+test('system, allow-listed, relative and variable paths are kept', () => {
   const src = `services:
   app:
     image: x
@@ -67,15 +67,15 @@ test('ścieżki systemowe, dozwolone, względne i ze zmiennymi zostają', () => 
   const r = normalizeCompose(src, { hostPathAllowlist: ['/mnt'] });
   assert.equal(r.changes.length, 0);
   assert.equal(r.text, src);
-  assert.equal(r.warnings.length, 2); // /mnt + zmienna
+  assert.equal(r.warnings.length, 2); // /mnt + variable
 });
 
-test('ścieżka względna wychodząca poza stack jest przepinana', () => {
+test('relative path leaving the stack is moved', () => {
   const r = normalizeCompose(`services:\n  app:\n    image: x\n    volumes:\n      - ../inny/dane:/data\n`);
   assert.deepEqual(vols(r.text, 'app'), ['./data/app-data:/data']);
 });
 
-test('składnia długa: volume bez źródła i bind z hosta', () => {
+test('long syntax: sourceless volume and host bind', () => {
   const r = normalizeCompose(`services:
   app:
     image: x
@@ -96,18 +96,18 @@ test('składnia długa: volume bez źródła i bind z hosta', () => {
   assert.deepEqual(v[2], { type: 'tmpfs', target: '/tmp' });
 });
 
-test('komentarze w pliku zostają', () => {
-  const r = normalizeCompose(`# moja aplikacja\nservices:\n  app:\n    image: x # wersja\n    volumes:\n      - /config\n`);
-  assert.match(r.text, /# moja aplikacja/);
-  assert.match(r.text, /# wersja/);
+test('comments in the file are preserved', () => {
+  const r = normalizeCompose(`# my app\nservices:\n  app:\n    image: x # version\n    volumes:\n      - /config\n`);
+  assert.match(r.text, /# my app/);
+  assert.match(r.text, /# version/);
 });
 
-test('błędny YAML i brak services dają czytelny błąd', () => {
+test('invalid YAML and missing services give a clear error', () => {
   assert.throws(() => normalizeCompose('services: [\n'), (e) => e.key === 'compose.yamlError');
   assert.throws(() => normalizeCompose('version: "3"\n'), (e) => e.key === 'compose.noServices');
 });
 
-test('VOLUME z obrazu jest dopisywany, także gdy brak sekcji volumes', () => {
+test('image VOLUME is added, also without a volumes section', () => {
   const r = addImageVolumes(`services:\n  app:\n    image: x\n  db:\n    image: y\n    volumes:\n      - ./data/db:/var/lib/db\n`, {
     app: ['/data'],
     db: ['/backups'],
@@ -118,7 +118,7 @@ test('VOLUME z obrazu jest dopisywany, także gdy brak sekcji volumes', () => {
   assert.equal(r.changes.length, 2);
 });
 
-test('rozpoznawanie montowanych plików', () => {
+test('detects single-file mounts', () => {
   assert.ok(isFileLikeTarget('/etc/nginx/nginx.conf'));
   assert.ok(isFileLikeTarget('/app/config.yml'));
   assert.ok(!isFileLikeTarget('/etc/nginx/conf.d'));

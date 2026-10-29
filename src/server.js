@@ -45,7 +45,7 @@ const translateResult = (req, r) => ({
   warnings: translateAll(req.t, r.warnings),
 });
 
-// Strumień tekstowy (wyjście docker compose na żywo).
+// Plain-text stream (live docker compose output).
 function openStream(res) {
   res.status(200);
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -63,7 +63,7 @@ function abortOnClose(res) {
 
 const errorText = (req, err) => (err instanceof UserError ? req.t(err.key, err.vars) : err.message);
 
-// ---------- konto ----------
+// ---------- account ----------
 
 app.get('/api/state', (req, res) => {
   res.json({
@@ -114,7 +114,7 @@ app.post('/api/password', (req, res) => {
   res.json({ ok: true });
 });
 
-// ---------- ustawienia ----------
+// ---------- settings ----------
 
 app.get('/api/settings', (_req, res) => res.json({ ...getSettings(db), stacksDir: config.stacksDir }));
 
@@ -137,7 +137,7 @@ app.put('/api/settings', (req, res) => {
   res.json(saveSettings(db, patch));
 });
 
-// ---------- stacki ----------
+// ---------- stacks ----------
 
 app.get('/api/stacks', wrap(async (_req, res) => res.json(await stacks.list())));
 
@@ -191,7 +191,7 @@ app.get('/api/operations/:id', (req, res) => {
 
 app.use('/api', (req, res) => fail(req, res, 404, 'notFound'));
 
-// ---------- interfejs ----------
+// ---------- UI ----------
 
 const publicDir = path.join(__dirname, '..', 'public');
 app.use(express.static(publicDir, { index: 'index.html', maxAge: '1h' }));
@@ -210,6 +210,6 @@ app.use((err, req, res, _next) => {
 });
 
 app.listen(config.port, config.host, () => {
-  console.log(`StackPanel ${pkg.version} listening on http://${config.host}:${config.port}`);
+  console.log(`Moorline ${pkg.version} listening on http://${config.host}:${config.port}`);
   console.log(`Stacks: ${config.stacksDir}, panel data: ${config.dataDir}`);
 });

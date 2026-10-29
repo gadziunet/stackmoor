@@ -1,4 +1,4 @@
-// StackPanel – interfejs (bez frameworka, bez kroku budowania).
+// Moorline UI – no framework, no build step.
 import { t, lang, setLang, LANGS } from './i18n.js';
 
 const app = document.getElementById('app');
@@ -16,7 +16,7 @@ const NEW_STACK_TEMPLATE = `services:
 
 const stateLabel = (s) => t(`state.${s}`);
 
-// ---------- pomocnicze ----------
+// ---------- helpers ----------
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
@@ -30,7 +30,7 @@ function toast(msg) {
 
 const headers = (json) => ({
   ...(json ? { 'Content-Type': 'application/json' } : {}),
-  'X-Requested-With': 'stackpanel',
+  'X-Requested-With': 'moorline',
   'X-Lang': lang,
 });
 
@@ -49,7 +49,7 @@ async function api(method, url, body) {
   return data;
 }
 
-// Czyta odpowiedź strumieniową i przekazuje tekst na bieżąco. Zwraca kod wyjścia (jeśli jest).
+// Reads a streamed response and passes text through as it arrives. Returns the exit code (if any).
 async function stream(method, url, onText, signal) {
   const res = await fetch(url, { method, headers: headers(false), signal });
   if (!res.ok) {
@@ -60,7 +60,7 @@ async function stream(method, url, onText, signal) {
   const dec = new TextDecoder();
   let exit = null;
   let buf = '';
-  // Na ekran idą tylko pełne linie, żeby znacznik __EXIT__ nigdy nie został przecięty.
+  // Only full lines are shown, so the __EXIT__ marker is never split.
   const flush = (all) => {
     const cut = all ? buf.length : buf.lastIndexOf('\n') + 1;
     if (cut <= 0) return;
@@ -133,20 +133,21 @@ function langSelect(id) {
 function bindLangSelect(id) {
   document.getElementById(id)?.addEventListener('change', (e) => {
     setLang(e.target.value);
-    document.querySelector('.layout')?.remove(); // przebuduj cały układ w nowym języku
+    document.querySelector('.layout')?.remove(); // rebuild the whole layout in the new language
     render();
   });
 }
 
-// ---------- logowanie ----------
+// ---------- login ----------
 
 function renderAuth() {
   const setup = state.needsSetup;
   app.innerHTML = `
     <div class="auth"><form class="card" id="auth">
       <div class="row" style="justify-content:space-between;align-items:flex-start">
-        <h1>${t(setup ? 'auth.welcome' : 'auth.login')}</h1>${langSelect('auth-lang')}
+        <img src="/logo.svg" alt="Moorline" width="52" height="52">${langSelect('auth-lang')}
       </div>
+      <h1>${t(setup ? 'auth.welcome' : 'auth.login')}</h1>
       <p>${t(setup ? 'auth.setupLead' : 'auth.loginLead')}</p>
       <div class="field"><label for="u">${t('auth.username')}</label>
         <input type="text" id="u" autocomplete="username" autocapitalize="off" required value="${setup ? 'admin' : ''}"></div>
@@ -169,9 +170,9 @@ function renderAuth() {
   });
 }
 
-// ---------- układ ----------
+// ---------- layout ----------
 
-const LOGO = `<svg viewBox="0 0 32 32" aria-hidden="true"><rect x="4" y="6" width="24" height="6" rx="2" fill="#2f7d6d"/><rect x="4" y="14" width="24" height="6" rx="2" fill="#3f9b88"/><rect x="4" y="22" width="24" height="6" rx="2" fill="#67b8a6"/></svg>`;
+const LOGO = `<img src="/logo.svg" alt="" width="28" height="28">`;
 
 function route() {
   const h = location.hash.replace(/^#\/?/, '');
@@ -187,7 +188,7 @@ function renderShell() {
     app.innerHTML = `
       <div class="layout">
         <aside class="sidebar">
-          <div class="brand">${LOGO}<span>StackPanel</span><span class="version">${esc(state.version)}</span></div>
+          <div class="brand">${LOGO}<span>Moorline</span><span class="version">${esc(state.version)}</span></div>
           <a class="btn primary new" href="#/new">${t('nav.newStack')}</a>
           <ul class="stack-list" id="stack-list"></ul>
           <div class="sidebar-foot">
@@ -224,10 +225,10 @@ async function refreshStacks() {
     state.stacks = await api('GET', '/api/stacks');
     renderStackList();
     if (route().page === 'home') renderHome();
-  } catch { /* np. wylogowanie */ }
+  } catch { /* e.g. logged out */ }
 }
 
-// ---------- strony ----------
+// ---------- pages ----------
 
 function renderHome() {
   const main = document.getElementById('main');
@@ -504,7 +505,7 @@ async function renderStack(name) {
         badge.className = `badge ${s.state}`;
         badge.textContent = stateLabel(s.state);
       }
-      // compose.yaml mógł zostać uzupełniony o wolumeny z obrazu
+      // compose.yaml may have gained volumes declared by the image
       const fresh = await api('GET', `/api/stacks/${name}`).catch(() => null);
       if (fresh) {
         data.compose = fresh.compose;

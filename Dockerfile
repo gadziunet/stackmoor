@@ -1,19 +1,19 @@
-# ---- zależności (better-sqlite3 to moduł natywny) ----
+# ---- dependencies (better-sqlite3 is a native module) ----
 FROM node:22-alpine AS deps
 WORKDIR /app
 RUN apk add --no-cache python3 make g++
 COPY package.json package-lock.json* ./
 RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi
 
-# ---- obraz końcowy ----
+# ---- final image ----
 FROM node:22-alpine
 WORKDIR /app
 
-LABEL org.opencontainers.image.title="stackpanel" \
+LABEL org.opencontainers.image.title="moorline" \
       org.opencontainers.image.description="Simple web UI for Docker Compose stacks" \
       org.opencontainers.image.licenses="AGPL-3.0-only"
 
-# Klient Dockera i wtyczka compose (statyczne binarki z oficjalnego obrazu).
+# Docker CLI and compose plugin (static binaries from the official image).
 COPY --from=docker:cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=docker:cli /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/libexec/docker/cli-plugins/docker-compose
 

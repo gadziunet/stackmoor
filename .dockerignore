@@ -5,3 +5,4 @@ test
 *.md
 .github
 install.sh
+assets

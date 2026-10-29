@@ -1,4 +1,6 @@
-# StackPanel
+<p align="center"><img src="assets/banner.png" alt="Moorline – stacki Docker Compose bez myślenia o ścieżkach wolumenów" width="100%"></p>
+
+# Moorline
 
 Prosty webowy panel do stacków Docker Compose – w duchu Dockge, ale bez myślenia o ścieżkach wolumenów. Każdy stack trzyma dane we własnym folderze, gotowym do backupu.
 
@@ -11,14 +13,14 @@ Prosty webowy panel do stacków Docker Compose – w duchu Dockge, ale bez myśl
 Na czystym Debianie, Ubuntu albo Raspberry Pi OS (x86_64 lub arm64):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OWNER/stackpanel/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/OWNER/moorline/main/install.sh | sudo bash
 ```
 
-Skrypt instaluje Dockera, jeśli go brakuje, uruchamia StackPanel i wypisuje adres, np. `http://192.168.1.50:5001`. Przy pierwszym wejściu tworzysz konto administratora.
+Skrypt instaluje Dockera, jeśli go brakuje, uruchamia Moorline i wypisuje adres, np. `http://192.168.1.50:5001`. Przy pierwszym wejściu tworzysz konto administratora.
 
 Ponowne uruchomienie tego samego polecenia aktualizuje panel. Opcjonalnie: `curl ... | sudo PORT=8080 STACKS_DIR=/srv/stacks bash`.
 
-> StackPanel ma dostęp do gniazda Dockera, czyli pełną kontrolę nad maszyną. Trzymaj go w sieci lokalnej albo za VPN.
+> Moorline ma dostęp do gniazda Dockera, czyli pełną kontrolę nad maszyną. Trzymaj go w sieci lokalnej albo za VPN.
 
 ## Co potrafi
 
@@ -51,7 +53,7 @@ Automatyczne wolumeny można wyłączyć dla wybranego stacka.
 
 1. Utwórz `/opt/stacks/<nazwa>/data/` i skopiuj tam dane aplikacji (dokładną nazwę podfolderu panel pokaże po zapisie compose).
 2. Zatrzymaj aplikację w starym panelu.
-3. W StackPanel utwórz stack z tym samym compose – ścieżki zostaną przepięte na `./data/...`.
+3. W Moorline utwórz stack z tym samym compose – ścieżki zostaną przepięte na `./data/...`.
 4. Uruchom i sprawdź.
 
 Stack można utworzyć w istniejącym folderze bez `compose.yaml`, więc dane możesz wgrać wcześniej.
@@ -77,4 +79,4 @@ Tłumaczenia: dopisz blok języka w `src/i18n.js` i `public/i18n.js` – testy s
 
 ## Licencja
 
-[AGPL-3.0](LICENSE) © Gadziunet. Możesz używać, zmieniać i udostępniać StackPanel za darmo; jeśli rozpowszechniasz zmienioną wersję albo udostępniasz ją jako usługę w sieci, musisz opublikować swoje zmiany na tej samej licencji.
+[AGPL-3.0](LICENSE) © Gadziunet. Możesz używać, zmieniać i udostępniać Moorline za darmo; jeśli rozpowszechniasz zmienioną wersję albo udostępniasz ją jako usługę w sieci, musisz opublikować swoje zmiany na tej samej licencji.

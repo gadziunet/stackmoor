@@ -8,8 +8,8 @@ const ENV = {
 };
 
 /**
- * Uruchamia polecenie `docker ...` bez powłoki (argumenty jako tablica,
- * więc nazwy stacków itp. nie mogą wstrzyknąć poleceń).
+ * Runs `docker ...` without a shell (arguments as an array,
+ * so stack names etc. cannot inject commands).
  */
 export function docker(args, { cwd, onData, signal } = {}) {
   return new Promise((resolve) => {
@@ -56,7 +56,7 @@ export function docker(args, { cwd, onData, signal } = {}) {
   });
 }
 
-// `docker compose ... --format json` zwraca albo tablicę, albo JSON w każdej linii.
+// `docker compose ... --format json` returns either an array or one JSON object per line.
 export function parseJsonLines(text) {
   const t = String(text || '').trim();
   if (!t) return [];

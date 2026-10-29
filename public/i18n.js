@@ -1,10 +1,10 @@
-// Teksty interfejsu. Aby dodać język: skopiuj blok "en", przetłumacz i dodaj do LANGS.
+// UI texts. To add a language: copy the "en" block, translate it and add it to LANGS.
 
 export const LANGS = { en: 'English', pl: 'Polski' };
 
 const dict = {
   en: {
-    'auth.welcome': 'Welcome to StackPanel',
+    'auth.welcome': 'Welcome to Moorline',
     'auth.login': 'Log in',
     'auth.setupLead': 'Create the administrator account. It will be the only account in the panel.',
     'auth.loginLead': 'Docker Compose stack manager.',
@@ -114,7 +114,7 @@ const dict = {
   },
 
   pl: {
-    'auth.welcome': 'Witaj w StackPanel',
+    'auth.welcome': 'Witaj w Moorline',
     'auth.login': 'Zaloguj się',
     'auth.setupLead': 'Utwórz konto administratora. Będzie jedynym kontem w panelu.',
     'auth.loginLead': 'Panel zarządzania stackami Docker Compose.',
@@ -226,9 +226,9 @@ const dict = {
 
 function detect() {
   try {
-    const saved = localStorage.getItem('sp-lang');
+    const saved = localStorage.getItem('ml-lang');
     if (saved && dict[saved]) return saved;
-  } catch { /* brak dostępu do localStorage */ }
+  } catch { /* localStorage unavailable */ }
   const nav = (navigator.language || 'en').slice(0, 2).toLowerCase();
   return dict[nav] ? nav : 'en';
 }
@@ -239,10 +239,10 @@ export function setLang(code) {
   if (!dict[code]) return;
   lang = code;
   document.documentElement.lang = code;
-  try { localStorage.setItem('sp-lang', code); } catch { /* trudno */ }
+  try { localStorage.setItem('ml-lang', code); } catch { /* ignore */ }
 }
 
-// Wartości w {zmiennych} muszą być już bezpieczne dla HTML (używamy esc() przed przekazaniem).
+// Values passed as {variables} must already be HTML-safe (use esc() before passing them).
 export function t(key, vars = {}) {
   const template = dict[lang]?.[key] ?? dict.en[key] ?? key;
   return template.replace(/\{(\w+)\}/g, (_m, name) => (name in vars ? String(vars[name]) : `{${name}}`));

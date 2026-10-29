@@ -1,4 +1,6 @@
-# StackPanel
+<p align="center"><img src="assets/banner.png" alt="Moorline – Docker Compose stacks without thinking about volume paths" width="100%"></p>
+
+# Moorline
 
 A simple web UI for Docker Compose stacks – in the spirit of Dockge, but you never have to think about volume paths. Every stack keeps its data in its own folder, ready for backups.
 
@@ -11,14 +13,14 @@ A simple web UI for Docker Compose stacks – in the spirit of Dockge, but you n
 On a clean Debian, Ubuntu or Raspberry Pi OS machine (x86_64 or arm64):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OWNER/stackpanel/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/OWNER/moorline/main/install.sh | sudo bash
 ```
 
-The script installs Docker if it's missing, starts StackPanel and prints its address, e.g. `http://192.168.1.50:5001`. On first visit you create the administrator account.
+The script installs Docker if it's missing, starts Moorline and prints its address, e.g. `http://192.168.1.50:5001`. On first visit you create the administrator account.
 
 Run the same command again to update. Optional settings: `curl ... | sudo PORT=8080 STACKS_DIR=/srv/stacks bash`.
 
-> StackPanel has access to the Docker socket, which means full control over the machine. Keep it on your local network or behind a VPN.
+> Moorline has access to the Docker socket, which means full control over the machine. Keep it on your local network or behind a VPN.
 
 ## Features
 
@@ -86,4 +88,4 @@ Translations: add a language block to `src/i18n.js` and `public/i18n.js` – tes
 
 ## License
 
-[AGPL-3.0](LICENSE) © Gadziunet. You may use, modify and share StackPanel freely; if you distribute a modified version or offer it as a network service, you must publish your changes under the same license.
+[AGPL-3.0](LICENSE) © Gadziunet. You may use, modify and share Moorline freely; if you distribute a modified version or offer it as a network service, you must publish your changes under the same license.

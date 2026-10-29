@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 
-// Kolejne migracje schematu. Nowe zmiany dopisujemy na końcu listy,
-// nigdy nie edytujemy już istniejących (numer = PRAGMA user_version).
+// Schema migrations. Append new ones at the end; never edit existing ones
+// (the index is stored in PRAGMA user_version).
 const MIGRATIONS = [
   `
   CREATE TABLE users (
@@ -38,11 +38,11 @@ const MIGRATIONS = [
 ];
 
 export const DEFAULT_SETTINGS = {
-  // Właściciel folderów tworzonych automatycznie dla danych aplikacji.
+  // Owner of folders created automatically for app data.
   puid: 1000,
   pgid: 1000,
-  // Ścieżki hosta, których panel NIE przepina do folderu stacka
-  // (np. biblioteki multimediów). Nie są objęte backupem.
+  // Host paths the panel does NOT move into the stack folder
+  // (e.g. media libraries). They are not backed up.
   hostPathAllowlist: ['/mnt', '/media'],
 };
 
@@ -61,7 +61,7 @@ export function openDb(file) {
     })();
   }
 
-  // Operacje przerwane restartem panelu nie mogą wisieć jako "running".
+  // Operations interrupted by a panel restart must not stay "running" forever.
   db.prepare(
     `UPDATE operations SET status = 'interrupted', finished_at = datetime('now') WHERE status = 'running'`
   ).run();
@@ -74,7 +74,7 @@ export function getSettings(db) {
   const out = { ...DEFAULT_SETTINGS };
   for (const { key, value } of rows) {
     if (key in DEFAULT_SETTINGS) {
-      try { out[key] = JSON.parse(value); } catch { /* zostaje domyślna */ }
+      try { out[key] = JSON.parse(value); } catch { /* keep the default */ }
     }
   }
   return out;

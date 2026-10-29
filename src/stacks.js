@@ -26,7 +26,7 @@ function parseLsStatus(status = '') {
   return { state, running, total };
 }
 
-// t = funkcja tłumacząca z i18n.js, przekazywana z żądania (język użytkownika).
+// t = translate function from i18n.js, passed in from the request (user's language).
 export function createStacks({ db, stacksDir, getSettings }) {
   const locks = new Set();
 
@@ -61,7 +61,7 @@ export function createStacks({ db, stacksDir, getSettings }) {
     '-p', name, '--project-directory', stackDir(name), '-f', file,
   ];
 
-  // ---------- odczyt ----------
+  // ---------- read ----------
 
   async function list() {
     let entries = [];
@@ -110,7 +110,7 @@ export function createStacks({ db, stacksDir, getSettings }) {
     };
   }
 
-  // ---------- zapis ----------
+  // ---------- write ----------
 
   async function validate(name, composeText, envText) {
     const dir = stackDir(name);
@@ -133,7 +133,7 @@ export function createStacks({ db, stacksDir, getSettings }) {
     }
   }
 
-  // Zwraca { compose, changes[{key,vars}], warnings[{key,vars}] }.
+  // Returns { compose, changes[{key,vars}], warnings[{key,vars}] }.
   async function save(name, { compose, env = '', autoVolumes: auto }, { create = false } = {}) {
     assertName(name);
     if (locks.has(name)) throw new UserError('stack.busy', {}, 409);
@@ -168,7 +168,7 @@ export function createStacks({ db, stacksDir, getSettings }) {
     return { compose: result.text, changes: result.changes, warnings: result.warnings };
   }
 
-  // ---------- przygotowanie przed startem ----------
+  // ---------- preparing a start ----------
 
   async function resolvedConfig(name, file) {
     const r = await docker([...base(name, file), 'config', '--format', 'json']);
@@ -178,7 +178,7 @@ export function createStacks({ db, stacksDir, getSettings }) {
 
   async function imageVolumes(image) {
     const r = await docker(['image', 'inspect', '--format', '{{json .Config.Volumes}}', image]);
-    if (r.code !== 0) return null; // obrazu nie ma lokalnie
+    if (r.code !== 0) return null; // image not present locally
     try {
       return Object.keys(JSON.parse(r.stdout.trim()) || {});
     } catch {
@@ -187,7 +187,7 @@ export function createStacks({ db, stacksDir, getSettings }) {
   }
 
   function mkdirOwned(target, stopAt, uid, gid) {
-    // Tworzymy brakujące foldery i nadajemy im właściciela (tylko te nowo utworzone).
+    // Create missing folders and set their owner (only the newly created ones).
     const created = [];
     let p = target;
     while (p.startsWith(stopAt) && p !== stopAt && !fs.existsSync(p)) {
@@ -196,7 +196,7 @@ export function createStacks({ db, stacksDir, getSettings }) {
     }
     for (const dir of created) {
       fs.mkdirSync(dir);
-      try { fs.chownSync(dir, uid, gid); } catch { /* np. macOS albo panel bez roota */ }
+      try { fs.chownSync(dir, uid, gid); } catch { /* e.g. macOS or panel not running as root */ }
     }
     return created.length > 0;
   }
@@ -229,7 +229,7 @@ export function createStacks({ db, stacksDir, getSettings }) {
       }
     }
 
-    // Tworzymy foldery na dane zanim zrobi to Docker (on założyłby je jako root).
+    // Create data folders before Docker does (it would create them owned by root).
     const cfg = await resolvedConfig(name, file);
     const missingFiles = [];
     for (const [svc, def] of Object.entries(cfg.services || {})) {
@@ -251,7 +251,7 @@ export function createStacks({ db, stacksDir, getSettings }) {
     return file;
   }
 
-  // ---------- akcje ----------
+  // ---------- actions ----------
 
   async function action(name, act, write, { signal, t }) {
     if (!ACTIONS.has(act)) throw new UserError('action.unknown');
@@ -280,7 +280,7 @@ export function createStacks({ db, stacksDir, getSettings }) {
           await step(['up', '-d', '--remove-orphans']);
           break;
         case 'update':
-          // Tu w etapie 3 wejdzie automatyczny backup przed aktualizacją.
+          // TODO: automatic backup before update (backups milestone).
           await step(['pull']);
           file = await prepare(name, log, t);
           await step(['up', '-d', '--remove-orphans']);
@@ -324,7 +324,7 @@ export function createStacks({ db, stacksDir, getSettings }) {
       write(`$ docker compose down --remove-orphans\n`);
       const r = await docker([...base(name, file), 'down', '--remove-orphans'], { onData: write });
       if (r.code !== 0) throw new UserError('remove.stopFailed');
-      // Nie kasujemy danych na stałe: folder trafia do kosza.
+      // Never delete data permanently: the folder goes to the trash.
       const trash = path.join(stacksDir, '.trash');
       fs.mkdirSync(trash, { recursive: true });
       const stamp = new Date().toISOString().replace(/[:.]/g, '-');

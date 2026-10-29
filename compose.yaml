@@ -1,19 +1,18 @@
-# Uruchomienie panelu na serwerze.
-# WAŻNE: folder stacków musi być zamontowany pod TĄ SAMĄ ścieżką w kontenerze
-# co na hoście, bo panel przekazuje ścieżki Dockerowi na hoście.
-# Domyślnie /opt/stacks. Na Macu ustaw w pliku .env np.: STACKS_DIR=/Users/<ty>/stacks
+# Development setup (builds the image from source). For servers use install.sh.
+# IMPORTANT: the stacks folder must be mounted at the SAME path inside the container
+# as on the host, because the panel passes paths to the host's Docker daemon.
+# Default: /opt/stacks. On a Mac set it in .env, e.g.: STACKS_DIR=/Users/<you>/stacks
 services:
-  stackpanel:
+  moorline:
     build: .
-    # Po zbudowaniu w swoim rejestrze możesz zamienić "build" na np.:
-    # image: registry.twojadomena.pl/gadziunet/stackpanel:latest
-    container_name: stackpanel
+    # Or use a published image instead of building:
+    # image: ghcr.io/OWNER/moorline:latest
+    container_name: moorline
     restart: unless-stopped
     ports:
       - "5001:5001"
     environment:
       - STACKS_DIR=${STACKS_DIR:-/opt/stacks}
-      - TZ=Europe/Warsaw
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${STACKS_DIR:-/opt/stacks}:${STACKS_DIR:-/opt/stacks}
