@@ -6,12 +6,12 @@ import { VERSION, REPO, compareVersions, isSemver, newestTag } from './version.j
 import { remoteDigest, localDigests, parseImageRef } from './registry.js';
 
 const INTERVALS = { daily: 24 * 3600e3, weekly: 7 * 24 * 3600e3 };
-const UPDATER_NAME = 'moorline-updater';
+const UPDATER_NAME = 'stackmoor-updater';
 
 async function github(pathname) {
   try {
     const res = await fetch(`https://api.github.com/repos/${REPO}${pathname}`, {
-      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'moorline' },
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'stackmoor' },
       signal: AbortSignal.timeout(15000),
     });
     return res.ok ? await res.json() : null;

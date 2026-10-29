@@ -28,7 +28,7 @@ test('every provider has help in both languages', () => {
 });
 
 test('secrets are encrypted and can be read back', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'moorline-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stackmoor-'));
   initSecrets(dir);
   const blob = encrypt({ api_token: 'top-secret-1234' });
   assert.ok(!blob.includes('top-secret'));

@@ -57,9 +57,9 @@ export function createStacks({ db, stacksDir, getSettings }) {
     return row ? row.auto_volumes === 1 : true;
   }
 
-  // Moorline-generated additions (e.g. joining the "moorline" network for domains)
+  // Stackmoor-generated additions (e.g. joining the "stackmoor" network for domains)
   // live in a separate override file, so the user's compose.yaml stays untouched.
-  const OVERRIDE = 'compose.moorline.yaml';
+  const OVERRIDE = 'compose.stackmoor.yaml';
   const base = (name, file) => {
     const args = [
       'compose', '--ansi', 'never', '--progress', 'plain',
@@ -259,10 +259,10 @@ export function createStacks({ db, stacksDir, getSettings }) {
     if (missingFiles.length) throw new UserError('files.missing', { list: missingFiles.join('\n') });
 
     await checkPorts(name, cfg);
-    // Stacks with a domain join the shared "moorline" network; make sure it exists.
+    // Stacks with a domain join the shared "stackmoor" network; make sure it exists.
     if (fs.existsSync(path.join(dir, OVERRIDE))) {
-      const net = await docker(['network', 'inspect', 'moorline']);
-      if (net.code !== 0) await docker(['network', 'create', 'moorline']);
+      const net = await docker(['network', 'inspect', 'stackmoor']);
+      if (net.code !== 0) await docker(['network', 'create', 'stackmoor']);
     }
     return file;
   }

@@ -70,7 +70,7 @@ export const DEFAULT_SETTINGS = {
   acmeEmail: '',
   httpPort: 80,
   httpsPort: 443,
-  panelSubdomain: '',    // e.g. "moorline" -> the panel itself at moorline.<domain>
+  panelSubdomain: '',    // e.g. "stackmoor" -> the panel itself at stackmoor.<domain>
 };
 
 export function openDb(file) {

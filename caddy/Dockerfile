@@ -1,4 +1,4 @@
-# Caddy with the DNS provider plugins Moorline offers (see src/dns-providers.js).
+# Caddy with the DNS provider plugins Stackmoor offers (see src/dns-providers.js).
 # Cross-compiled on the build machine for each target platform (fast, no emulation).
 ARG CADDY_VERSION=2.11
 
@@ -26,8 +26,8 @@ COPY --from=builder /usr/bin/caddy /usr/bin/caddy
 # Allow binding ports 80/443 without full root capabilities.
 RUN setcap cap_net_bind_service=+ep /usr/bin/caddy
 
-LABEL org.opencontainers.image.title="moorline-caddy" \
-      org.opencontainers.image.description="Caddy with DNS provider plugins, used by Moorline for local domains" \
+LABEL org.opencontainers.image.title="stackmoor-caddy" \
+      org.opencontainers.image.description="Caddy with DNS provider plugins, used by Stackmoor for local domains" \
       org.opencontainers.image.licenses="Apache-2.0"
 
 CMD ["caddy", "run", "--config", "/etc/caddy/caddy.json"]

@@ -312,6 +312,6 @@ app.use((err, req, res, _next) => {
 });
 
 app.listen(config.port, config.host, () => {
-  console.log(`Moorline ${VERSION} listening on http://${config.host}:${config.port}`);
+  console.log(`Stackmoor ${VERSION} listening on http://${config.host}:${config.port}`);
   console.log(`Stacks: ${config.stacksDir}, panel data: ${config.dataDir}`);
 });

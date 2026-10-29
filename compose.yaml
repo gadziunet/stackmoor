@@ -3,11 +3,11 @@
 # as on the host, because the panel passes paths to the host's Docker daemon.
 # Default: /opt/stacks. On a Mac set it in .env, e.g.: STACKS_DIR=/Users/<you>/stacks
 services:
-  moorline:
+  stackmoor:
     build: .
     # Or use a published image instead of building:
-    # image: ghcr.io/gadziunet/moorline:latest
-    container_name: moorline
+    # image: ghcr.io/gadziunet/stackmoor:latest
+    container_name: stackmoor
     restart: unless-stopped
     ports:
       - "5001:5001"

@@ -4,7 +4,7 @@ export const LANGS = { en: 'English', pl: 'Polski' };
 
 const dict = {
   en: {
-    'auth.welcome': 'Welcome to Moorline',
+    'auth.welcome': 'Welcome to Stackmoor',
     'auth.login': 'Log in',
     'auth.setupLead': 'Create the administrator account. It will be the only account in the panel.',
     'auth.loginLead': 'Docker Compose stack manager.',
@@ -144,7 +144,7 @@ const dict = {
     'dom.internalHint': 'Caddy uses its own certificate authority. Browsers will warn until you trust Caddy’s root certificate on your devices. Good for testing or when your DNS provider is not on the list.',
     'dom.email': 'E-mail for Let’s Encrypt',
     'dom.panelSub': 'Address of this panel',
-    'dom.panelSubHint': 'E.g. <code>moorline</code> → the panel is also available at moorline.&lt;domain&gt;.',
+    'dom.panelSubHint': 'E.g. <code>stackmoor</code> → the panel is also available at stackmoor.&lt;domain&gt;.',
     'dom.advanced': 'Advanced: ports',
     'dom.portsHint': 'Ports Caddy uses on this server. Change them if 80/443 are taken – e.g. on Unraid, where its own web UI uses them.',
     'dom.saveApply': 'Save and apply',
@@ -158,16 +158,16 @@ const dict = {
     'upd.never': 'Not checked yet.',
     'upd.checkNow': 'Check now',
     'upd.checking': 'Checking…',
-    'upd.upToDate': 'Moorline is up to date.',
+    'upd.upToDate': 'Stackmoor is up to date.',
     'upd.checkError': 'Could not check for updates (no internet access?).',
-    'upd.newVersion': 'Moorline {version} is available',
-    'upd.newBuild': 'A newer build of Moorline is available',
+    'upd.newVersion': 'Stackmoor {version} is available',
+    'upd.newBuild': 'A newer build of Stackmoor is available',
     'upd.newBuildShort': 'the newer build',
     'upd.releaseLink': 'What’s new',
-    'upd.apply': 'Update Moorline',
-    'upd.confirm': 'Update Moorline to {version}? The panel restarts for a moment; your stacks keep running.',
+    'upd.apply': 'Update Stackmoor',
+    'upd.confirm': 'Update Stackmoor to {version}? The panel restarts for a moment; your stacks keep running.',
     'upd.restarting': 'Updating… The panel will restart and this page reloads by itself.',
-    'upd.how.unraid': 'Update it in Unraid: Docker tab → Check for Updates → Update next to moorline.',
+    'upd.how.unraid': 'Update it in Unraid: Docker tab → Check for Updates → Update next to stackmoor.',
     'upd.how.pinned': 'The panel runs a fixed image version ({tag}). Change the image tag to <code>latest</code> or to the new version and recreate the container.',
     'upd.how.manual': 'Update it the same way you installed it – e.g. run <code>install.sh</code> again, or <code>docker compose pull &amp;&amp; docker compose up -d</code> in its folder.',
     'upd.how.none': 'Update it the same way you installed it.',
@@ -194,7 +194,7 @@ const dict = {
   },
 
   pl: {
-    'auth.welcome': 'Witaj w Moorline',
+    'auth.welcome': 'Witaj w Stackmoor',
     'auth.login': 'Zaloguj się',
     'auth.setupLead': 'Utwórz konto administratora. Będzie jedynym kontem w panelu.',
     'auth.loginLead': 'Panel zarządzania stackami Docker Compose.',
@@ -334,7 +334,7 @@ const dict = {
     'dom.internalHint': 'Caddy używa własnego urzędu certyfikacji. Przeglądarki będą ostrzegać, dopóki nie zaufasz certyfikatowi głównemu Caddy na swoich urządzeniach. Dobre do testów albo gdy Twojego dostawcy DNS nie ma na liście.',
     'dom.email': 'E-mail dla Let’s Encrypt',
     'dom.panelSub': 'Adres tego panelu',
-    'dom.panelSubHint': 'Np. <code>moorline</code> → panel będzie też dostępny pod moorline.&lt;domena&gt;.',
+    'dom.panelSubHint': 'Np. <code>stackmoor</code> → panel będzie też dostępny pod stackmoor.&lt;domena&gt;.',
     'dom.advanced': 'Zaawansowane: porty',
     'dom.portsHint': 'Porty, których Caddy używa na tym serwerze. Zmień je, jeśli 80/443 są zajęte – np. na Unraid, gdzie używa ich jego własny panel.',
     'dom.saveApply': 'Zapisz i zastosuj',
@@ -348,16 +348,16 @@ const dict = {
     'upd.never': 'Jeszcze nie sprawdzano.',
     'upd.checkNow': 'Sprawdź teraz',
     'upd.checking': 'Sprawdzam…',
-    'upd.upToDate': 'Moorline jest aktualny.',
+    'upd.upToDate': 'Stackmoor jest aktualny.',
     'upd.checkError': 'Nie udało się sprawdzić aktualizacji (brak internetu?).',
-    'upd.newVersion': 'Dostępny jest Moorline {version}',
-    'upd.newBuild': 'Dostępna jest nowsza kompilacja Moorline',
+    'upd.newVersion': 'Dostępny jest Stackmoor {version}',
+    'upd.newBuild': 'Dostępna jest nowsza kompilacja Stackmoor',
     'upd.newBuildShort': 'nowszej kompilacji',
     'upd.releaseLink': 'Co nowego',
-    'upd.apply': 'Aktualizuj Moorline',
-    'upd.confirm': 'Zaktualizować Moorline do {version}? Panel na chwilę się zrestartuje, stacki działają dalej.',
+    'upd.apply': 'Aktualizuj Stackmoor',
+    'upd.confirm': 'Zaktualizować Stackmoor do {version}? Panel na chwilę się zrestartuje, stacki działają dalej.',
     'upd.restarting': 'Aktualizuję… Panel się zrestartuje, a ta strona odświeży się sama.',
-    'upd.how.unraid': 'Zaktualizuj w Unraid: zakładka Docker → Check for Updates → Update przy moorline.',
+    'upd.how.unraid': 'Zaktualizuj w Unraid: zakładka Docker → Check for Updates → Update przy stackmoor.',
     'upd.how.pinned': 'Panel działa na stałej wersji obrazu ({tag}). Zmień tag obrazu na <code>latest</code> albo na nową wersję i odtwórz kontener.',
     'upd.how.manual': 'Zaktualizuj tak, jak instalowałeś – np. uruchom ponownie <code>install.sh</code> albo <code>docker compose pull &amp;&amp; docker compose up -d</code> w jego folderze.',
     'upd.how.none': 'Zaktualizuj tak, jak instalowałeś.',
@@ -386,7 +386,7 @@ const dict = {
 
 function detect() {
   try {
-    const saved = localStorage.getItem('ml-lang');
+    const saved = localStorage.getItem('sm-lang');
     if (saved && dict[saved]) return saved;
   } catch { /* localStorage unavailable */ }
   const nav = (navigator.language || 'en').slice(0, 2).toLowerCase();
@@ -399,7 +399,7 @@ export function setLang(code) {
   if (!dict[code]) return;
   lang = code;
   document.documentElement.lang = code;
-  try { localStorage.setItem('ml-lang', code); } catch { /* ignore */ }
+  try { localStorage.setItem('sm-lang', code); } catch { /* ignore */ }
 }
 
 // Values passed as {variables} must already be HTML-safe (use esc() before passing them).

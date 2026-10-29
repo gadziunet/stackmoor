@@ -1,6 +1,6 @@
 {
-  "name": "moorline",
-  "version": "0.3.0",
+  "name": "stackmoor",
+  "version": "0.4.0",
   "description": "Simple web UI for Docker Compose stacks with automatic volumes.",
   "type": "module",
   "main": "src/server.js",
@@ -19,5 +19,5 @@
   },
   "license": "AGPL-3.0-only",
   "private": true,
-  "repository": "github:gadziunet/moorline"
+  "repository": "github:gadziunet/stackmoor"
 }

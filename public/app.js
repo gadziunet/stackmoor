@@ -1,4 +1,4 @@
-// Moorline UI – no framework, no build step.
+// Stackmoor UI – no framework, no build step.
 import { t, lang, setLang, LANGS } from './i18n.js';
 
 const app = document.getElementById('app');
@@ -30,7 +30,7 @@ function toast(msg) {
 
 const headers = (json) => ({
   ...(json ? { 'Content-Type': 'application/json' } : {}),
-  'X-Requested-With': 'moorline',
+  'X-Requested-With': 'stackmoor',
   'X-Lang': lang,
 });
 
@@ -145,7 +145,7 @@ function renderAuth() {
   app.innerHTML = `
     <div class="auth"><form class="card" id="auth">
       <div class="row" style="justify-content:space-between;align-items:flex-start">
-        <img src="/logo.svg" alt="Moorline" width="52" height="52">${langSelect('auth-lang')}
+        <img src="/logo.svg" alt="Stackmoor" width="52" height="52">${langSelect('auth-lang')}
       </div>
       <h1>${t(setup ? 'auth.welcome' : 'auth.login')}</h1>
       <p>${t(setup ? 'auth.setupLead' : 'auth.loginLead')}</p>
@@ -189,7 +189,7 @@ function renderShell() {
     app.innerHTML = `
       <div class="layout">
         <aside class="sidebar">
-          <a class="brand" href="#/" title="${esc(t('home.title'))}">${LOGO}<span>Moorline</span></a><span class="version">${esc(state.version)}</span>
+          <a class="brand" href="#/" title="${esc(t('home.title'))}">${LOGO}<span>Stackmoor</span></a><span class="version">${esc(state.version)}</span>
           <a class="update-pill" id="panel-update" href="#/settings/updates" hidden></a>
           <a class="btn primary new" href="#/new"><span class="lbl-long">${t('nav.newStack')}</span><span class="lbl-short">${t('nav.newShort')}</span></a>
           <ul class="stack-list" id="stack-list"></ul>
@@ -199,7 +199,7 @@ function renderShell() {
           </div>
         </aside>
         <div class="main-wrap"><div id="global-warning"></div><main class="main" id="main"></main></div>
-        <nav class="bottom-nav" aria-label="Moorline">
+        <nav class="bottom-nav" aria-label="Stackmoor">
           <a href="#/" data-nav="home">${t('home.title')}</a>
           <a href="#/settings" data-nav="settings">${t('nav.settings')}</a>
         </nav>
@@ -717,7 +717,7 @@ function settingsUpdates(body, s) {
 
   body.innerHTML = `
     <div class="card">
-      <h2>Moorline</h2>
+      <h2>Stackmoor</h2>
       <div class="kv">
         <span>${t('upd.current')}</span><strong>${esc(showVersion(p.current || state.version.replace(/^v/, '')))}</strong>
         <span>${t('upd.latest')}</span><strong>${esc(showVersion(p.latest) || '—')}</strong>
@@ -858,7 +858,7 @@ async function settingsDomains(body) {
       <div class="field"><label for="dom-email">${t('dom.email')} <span class="hint">${t('new.envOptional')}</span></label>
         <input type="text" id="dom-email" value="${esc(d.acmeEmail)}" placeholder="you@example.com" autocapitalize="off"></div>
       <div class="field"><label for="dom-panel">${t('dom.panelSub')} <span class="hint">${t('new.envOptional')}</span></label>
-        <input type="text" id="dom-panel" value="${esc(d.panelSubdomain)}" placeholder="moorline" autocapitalize="off">
+        <input type="text" id="dom-panel" value="${esc(d.panelSubdomain)}" placeholder="stackmoor" autocapitalize="off">
         <p class="hint">${t('dom.panelSubHint')}</p></div>
       <details class="field"><summary>${t('dom.advanced')}</summary>
         <div class="row" style="margin-top:10px">

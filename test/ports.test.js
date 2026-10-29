@@ -54,12 +54,12 @@ test('stacks folder mount detection', () => {
   const info = [
     '1 0 0:1 / / rw - overlay overlay rw',
     '2 1 0:2 / /app/data rw - ext4 /dev/sda1 rw',
-    '3 1 0:3 / /mnt/user/appdata/moorline/stacks rw - fuse shfs rw',
+    '3 1 0:3 / /mnt/user/appdata/stackmoor/stacks rw - fuse shfs rw',
     '4 1 0:4 / /my\\040folder rw - ext4 /dev/sdb1 rw',
   ].join('\n');
   const points = mountPoints(info);
   assert.ok(points.includes('/my folder'));
-  assert.equal(mountFor('/mnt/user/appdata/moorline/stacks', points), '/mnt/user/appdata/moorline/stacks');
+  assert.equal(mountFor('/mnt/user/appdata/stackmoor/stacks', points), '/mnt/user/appdata/stackmoor/stacks');
   assert.equal(mountFor('/opt/stacks', points), '/');
   assert.equal(mountFor('/app/data-other', points), '/');
 });

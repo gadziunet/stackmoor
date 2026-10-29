@@ -1,5 +1,5 @@
 # Tests on every push; builds and publishes the image to GitHub Container Registry:
-#   - push to main      -> ghcr.io/<owner>/moorline:edge
+#   - push to main      -> ghcr.io/<owner>/stackmoor:edge
 #   - tag v1.2.3        -> :1.2.3, :1.2, :latest
 name: Build
 
@@ -67,7 +67,7 @@ jobs:
           cache-from: type=gha,scope=panel
           cache-to: type=gha,mode=max,scope=panel
 
-  # Caddy with DNS provider plugins, used for local domains (ghcr.io/<owner>/moorline-caddy).
+  # Caddy with DNS provider plugins, used for local domains (ghcr.io/<owner>/stackmoor-caddy).
   caddy-image:
     needs: test
     if: github.event_name == 'push'

@@ -10,7 +10,7 @@ const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'
 export const VERSION =
   process.env.APP_VERSION && process.env.APP_VERSION !== 'dev' ? process.env.APP_VERSION : pkg.version;
 
-export const REPO = process.env.MOORLINE_REPO || 'gadziunet/moorline';
+export const REPO = process.env.STACKMOOR_REPO || 'gadziunet/stackmoor';
 
 const parse = (v) => {
   const m = String(v || '').trim().replace(/^v/, '').match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/);

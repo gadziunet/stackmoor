@@ -9,7 +9,7 @@ RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit
 FROM node:22-alpine
 WORKDIR /app
 
-LABEL org.opencontainers.image.title="moorline" \
+LABEL org.opencontainers.image.title="stackmoor" \
       org.opencontainers.image.description="Simple web UI for Docker Compose stacks" \
       org.opencontainers.image.licenses="AGPL-3.0-only"
 

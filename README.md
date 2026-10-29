@@ -1,6 +1,6 @@
-<p align="center"><img src="assets/banner.png" alt="Moorline – Docker Compose stacks without thinking about volume paths" width="100%"></p>
+<p align="center"><img src="assets/banner.png" alt="Stackmoor – Docker Compose stacks without thinking about volume paths" width="100%"></p>
 
-# Moorline
+# Stackmoor
 
 A simple web UI for Docker Compose stacks – in the spirit of Dockge, but you never have to think about volume paths. Every stack keeps its data in its own folder, ready for backups.
 
@@ -13,14 +13,14 @@ A simple web UI for Docker Compose stacks – in the spirit of Dockge, but you n
 On a clean Debian, Ubuntu or Raspberry Pi OS machine (x86_64 or arm64):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gadziunet/moorline/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/gadziunet/stackmoor/main/install.sh | sudo bash
 ```
 
-The script installs Docker if it's missing, starts Moorline and prints its address, e.g. `http://192.168.1.50:5001`. On first visit you create the administrator account.
+The script installs Docker if it's missing, starts Stackmoor and prints its address, e.g. `http://192.168.1.50:5001`. On first visit you create the administrator account.
 
 Run the same command again to update. Optional settings: `curl ... | sudo PORT=8080 STACKS_DIR=/srv/stacks bash`.
 
-> Moorline has access to the Docker socket, which means full control over the machine. Keep it on your local network or behind a VPN.
+> Stackmoor has access to the Docker socket, which means full control over the machine. Keep it on your local network or behind a VPN.
 
 ## Features
 
@@ -57,7 +57,7 @@ Give every stack an address like `cloud.home.example.com` with a real HTTPS cert
 2. In your DNS create an A record `*.home.example.com` → the server's IP (a local IP is fine).
 3. **Stack → Domain:** choose a subdomain, the service and its port inside the container.
 
-Moorline runs Caddy in its own container (`moorline-caddy`) with one wildcard certificate for all apps. The DNS provider can be changed any time in Settings. On Unraid, ports 80/443 are used by its web UI – choose other ports under *Advanced*.
+Stackmoor runs Caddy in its own container (`stackmoor-caddy`) with one wildcard certificate for all apps. The DNS provider can be changed any time in Settings. On Unraid, ports 80/443 are used by its web UI – choose other ports under *Advanced*.
 
 ## Roadmap
 
@@ -65,7 +65,7 @@ Moorline runs Caddy in its own container (`moorline-caddy`) with one wildcard ce
 - [x] Local domains through Caddy – wildcard certificate via your DNS provider's API (14 providers) or an internal CA
 - [ ] Cloudron-style backups – per stack, automatically before updates, database dumps, schedule, retention, encryption; restic to S3 / Backblaze B2; restore and clone
 - [ ] Setup wizard: fresh install or restore everything from a backup
-- [ ] Updates: check for new Moorline versions and new stack images (on/off in Settings), show what is new and update only after confirmation
+- [ ] Updates: check for new Stackmoor versions and new stack images (on/off in Settings), show what is new and update only after confirmation
 
 ## Development
 
@@ -99,10 +99,10 @@ Translations: add a language block to `src/i18n.js` and `public/i18n.js` – tes
 
 ## How it's made
 
-Moorline is written with the help of AI – [Claude](https://claude.ai) by Anthropic. I design the features, review the changes and test every release myself on real servers (Debian and Unraid) before publishing it. The code is covered by automated tests that run on every push.
+Stackmoor is written with the help of AI – [Claude](https://claude.ai) by Anthropic. I design the features, review the changes and test every release myself on real servers (Debian and Unraid) before publishing it. The code is covered by automated tests that run on every push.
 
-If you find a bug, please [open an issue](https://github.com/gadziunet/moorline/issues).
+If you find a bug, please [open an issue](https://github.com/gadziunet/stackmoor/issues).
 
 ## License
 
-[AGPL-3.0](LICENSE) © Gadziunet. You may use, modify and share Moorline freely; if you distribute a modified version or offer it as a network service, you must publish your changes under the same license.
+[AGPL-3.0](LICENSE) © Gadziunet. You may use, modify and share Stackmoor freely; if you distribute a modified version or offer it as a network service, you must publish your changes under the same license.

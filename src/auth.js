@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-const COOKIE = 'ml_session';
+const COOKIE = 'sm_session';
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 // --- passwords (scrypt from the standard library, no extra dependencies) ---
@@ -89,7 +89,7 @@ export function requireAuth(req, res, next) {
 // never adds on its own when a form is submitted from another site.
 export function requireAppHeader(req, res, next) {
   if (req.method === 'GET' || req.method === 'HEAD') return next();
-  if (req.get('X-Requested-With') !== 'moorline') {
+  if (req.get('X-Requested-With') !== 'stackmoor') {
     return res.status(403).json({ error: req.t('auth.badRequest') });
   }
   next();

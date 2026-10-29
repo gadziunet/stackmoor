@@ -1,4 +1,4 @@
-// DNS providers built into the moorline-caddy image (see caddy/Dockerfile).
+// DNS providers built into the stackmoor-caddy image (see caddy/Dockerfile).
 // Each entry maps the panel's form fields to the JSON of the matching caddy-dns module.
 // To add a provider: add it here AND to caddy/Dockerfile, then release a new version.
 
