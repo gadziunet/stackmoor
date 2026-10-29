@@ -146,6 +146,14 @@ export function createUpdates({ db, stacks, getSettings }) {
   }
 
   function status() {
+    // A result saved by an older version (e.g. right before a self-update) must not
+    // keep saying "update available" – re-evaluate it against the running version.
+    let panel = getState(db, 'update.panel');
+    if (panel && panel.current !== VERSION) {
+      const cmp = panel.latest ? compareVersions(panel.latest, VERSION) : null;
+      panel = { ...panel, current: VERSION, updateAvailable: cmp !== null ? cmp > 0 : false, buildUpdate: false };
+      setState(db, 'update.panel', panel);
+    }
     const stacksState = getState(db, 'update.stacks', {});
     const stacksWithUpdates = Object.entries(stacksState)
       .filter(([, s]) => s.images.some((i) => i.updateAvailable))
@@ -153,7 +161,7 @@ export function createUpdates({ db, stacks, getSettings }) {
     return {
       checking: Boolean(running),
       lastRun: getState(db, 'update.lastRun'),
-      panel: getState(db, 'update.panel'),
+      panel,
       stacks: stacksState,
       stacksWithUpdates,
     };

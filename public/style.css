@@ -170,16 +170,43 @@ td code { font-size: 12.5px; }
 .home-grid a:hover { border-color: var(--muted); }
 
 /* ---------- phone ---------- */
+.lbl-short { display: none; }
+.bottom-nav { display: none; }
+
+/* ---------- phone: top bar + bottom navigation ---------- */
 @media (max-width: 760px) {
-  .layout { grid-template-columns: 1fr; }
-  .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
-  .stack-list { display: flex; overflow-x: auto; padding-bottom: 8px; }
-  .stack-list a { white-space: nowrap; }
-  .stack-list .count { display: none; }
-  .main { padding: 18px 16px 50px; }
+  .layout { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .sidebar {
+    position: sticky; top: 0; z-index: 5; height: auto;
+    display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px 12px;
+    padding: 10px 16px; border-right: 0; border-bottom: 1px solid var(--line);
+  }
+  .sidebar .brand { margin: 0; padding: 4px 6px; }
+  .sidebar .version, .stack-list, .sidebar-foot { display: none; }
+  .sidebar .new { margin: 0; grid-column: 2; grid-row: 1; min-height: 44px; padding: 0 16px; }
+  .lbl-long { display: none; }
+  .lbl-short { display: inline; }
+  .update-pill { grid-column: 1 / -1; margin: 0; }
+  .main { padding: 20px 16px 100px; }
   .notice.global { margin: 12px 16px 0; }
   textarea.code { min-height: 300px; }
   .hide-mobile { display: none; }
+
+  .home-grid { grid-template-columns: 1fr; gap: 10px; }
+  .home-grid a { min-height: 64px; padding: 12px 16px; }
+  .home-grid .dot { width: 10px; height: 10px; }
+
+  .bottom-nav {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+    background: var(--panel); border-top: 1px solid var(--line);
+  }
+  .bottom-nav a {
+    display: flex; align-items: center; justify-content: center; min-height: 44px;
+    border-radius: 10px; color: var(--muted); text-decoration: none;
+  }
+  .bottom-nav a.on { background: var(--sunken); color: var(--text); font-weight: 600; }
 }
 
 /* ---------- domains ---------- */

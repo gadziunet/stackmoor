@@ -191,7 +191,7 @@ function renderShell() {
         <aside class="sidebar">
           <a class="brand" href="#/" title="${esc(t('home.title'))}">${LOGO}<span>Moorline</span></a><span class="version">${esc(state.version)}</span>
           <a class="update-pill" id="panel-update" href="#/settings/updates" hidden></a>
-          <a class="btn primary new" href="#/new">${t('nav.newStack')}</a>
+          <a class="btn primary new" href="#/new"><span class="lbl-long">${t('nav.newStack')}</span><span class="lbl-short">${t('nav.newShort')}</span></a>
           <ul class="stack-list" id="stack-list"></ul>
           <div class="sidebar-foot">
             <a class="btn small" href="#/settings">${t('nav.settings')}</a>
@@ -199,6 +199,10 @@ function renderShell() {
           </div>
         </aside>
         <div class="main-wrap"><div id="global-warning"></div><main class="main" id="main"></main></div>
+        <nav class="bottom-nav" aria-label="Moorline">
+          <a href="#/" data-nav="home">${t('home.title')}</a>
+          <a href="#/settings" data-nav="settings">${t('nav.settings')}</a>
+        </nav>
       </div>`;
     document.getElementById('logout').addEventListener('click', async () => {
       await api('POST', '/api/logout').catch(() => {});
@@ -940,7 +944,17 @@ function settingsAccount(body) {
       <div class="field"><label for="nw">${t('pw.new')}</label><input type="password" id="nw" autocomplete="new-password" minlength="10" required></div>
       <div id="pw-out"></div>
       <button class="btn">${t('pw.submit')}</button>
-    </form>`;
+    </form>
+    <div class="card">
+      <h2>${t('nav.logout')}</h2>
+      <p class="hint">${t('acc.signedInAs', { user: esc(state.user?.username || '') })}</p>
+      <button type="button" class="btn" id="acc-logout">${t('nav.logout')}</button>
+    </div>`;
+  document.getElementById('acc-logout').addEventListener('click', async () => {
+    await api('POST', '/api/logout').catch(() => {});
+    state.user = null;
+    render();
+  });
   document.getElementById('pw').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
@@ -973,6 +987,11 @@ function render() {
   }
   renderShell();
   const r = route();
+  document.querySelectorAll('.bottom-nav a').forEach((a) => {
+    const on = a.dataset.nav === (r.page === 'settings' ? 'settings' : 'home');
+    a.classList.toggle('on', on);
+    if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+  });
   if (r.page === 'new') renderNew();
   else if (r.page === 'settings') renderSettings(r.tab);
   else if (r.page === 'stack') renderStack(r.name);

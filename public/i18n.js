@@ -15,6 +15,8 @@ const dict = {
     'auth.submit': 'Log in',
 
     'nav.newStack': '+ New stack',
+    'nav.newShort': '+ New',
+    'acc.signedInAs': 'Signed in as <strong>{user}</strong>.',
     'nav.settings': 'Settings',
     'nav.logout': 'Log out',
     'nav.noStacks': 'No stacks yet.',
@@ -203,6 +205,8 @@ const dict = {
     'auth.submit': 'Zaloguj',
 
     'nav.newStack': '+ Nowy stack',
+    'nav.newShort': '+ Nowy',
+    'acc.signedInAs': 'Zalogowano jako <strong>{user}</strong>.',
     'nav.settings': 'Ustawienia',
     'nav.logout': 'Wyloguj',
     'nav.noStacks': 'Brak stacków.',
