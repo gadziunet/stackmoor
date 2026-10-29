@@ -10,6 +10,7 @@ import {
 import { createStacks } from './stacks.js';
 import { UserError } from './errors.js';
 import { i18nMiddleware, translateAll } from './i18n.js';
+import { stacksDirMounted } from './mounts.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
@@ -25,6 +26,10 @@ fs.mkdirSync(config.dataDir, { recursive: true });
 fs.mkdirSync(config.stacksDir, { recursive: true });
 
 const db = openDb(path.join(config.dataDir, 'panel.db'));
+const stacksDirOk = stacksDirMounted(config.stacksDir);
+if (!stacksDirOk) {
+  console.warn(`WARNING: ${config.stacksDir} is not mounted from the host – mount it at the same path and set STACKS_DIR.`);
+}
 const stacks = createStacks({ db, stacksDir: config.stacksDir, getSettings: () => getSettings(db) });
 
 const app = express();
@@ -70,6 +75,7 @@ app.get('/api/state', (req, res) => {
     needsSetup: !hasUsers(),
     user: req.user ? { username: req.user.username } : null,
     version: pkg.version,
+    ...(req.user ? { stacksDir: config.stacksDir, stacksDirOk: stacksDirOk } : {}),
   });
 });
 

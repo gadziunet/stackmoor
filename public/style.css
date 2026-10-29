@@ -64,7 +64,9 @@ select.lang { border: 1px solid var(--line); background: var(--sunken); border-r
 .stack-list a.active { background: var(--sunken); font-weight: 600; }
 .stack-list .count { margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .sidebar-foot { border-top: 1px solid var(--line); padding: 10px 14px; display: flex; gap: 6px; flex-wrap: wrap; }
+.main-wrap { min-width: 0; }
 .main { padding: 28px 32px 60px; min-width: 0; }
+.notice.global { margin: 16px 32px 0; font-family: var(--sans); font-size: 14px; white-space: normal; }
 .empty-hint { color: var(--muted); padding: 10px 18px; font-size: 14px; }
 
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--idle); flex: none; }
@@ -157,6 +159,7 @@ td code { font-size: 12.5px; }
   .stack-list a { white-space: nowrap; }
   .stack-list .count { display: none; }
   .main { padding: 18px 16px 50px; }
+  .notice.global { margin: 12px 16px 0; }
   textarea.code { min-height: 300px; }
   .hide-mobile { display: none; }
 }

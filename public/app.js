@@ -196,7 +196,7 @@ function renderShell() {
             <button class="btn small" id="logout">${t('nav.logout')}</button>
           </div>
         </aside>
-        <main class="main" id="main"></main>
+        <div class="main-wrap"><div id="global-warning"></div><main class="main" id="main"></main></div>
       </div>`;
     document.getElementById('logout').addEventListener('click', async () => {
       await api('POST', '/api/logout').catch(() => {});
@@ -205,6 +205,12 @@ function renderShell() {
     });
   }
   renderStackList();
+  const warn = document.getElementById('global-warning');
+  if (warn) {
+    warn.innerHTML = state.stacksDirOk === false
+      ? `<div class="notice error global">${t('warn.stacksDir', { dir: esc(state.stacksDir) })}</div>`
+      : '';
+  }
 }
 
 function renderStackList() {
@@ -602,6 +608,8 @@ async function boot() {
   state.user = s.user;
   state.needsSetup = s.needsSetup;
   state.version = s.version ? `v${s.version}` : '';
+  state.stacksDir = s.stacksDir;
+  state.stacksDirOk = s.stacksDirOk;
   if (state.user) {
     state.stacks = await api('GET', '/api/stacks').catch(() => []);
     clearInterval(state.refreshTimer);

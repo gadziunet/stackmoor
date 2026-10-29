@@ -111,6 +111,7 @@ const dict = {
     'pw.new': 'New password',
     'pw.submit': 'Change password',
     'pw.done': 'Password changed',
+    'warn.stacksDir': 'The stacks folder <code>{dir}</code> is not mounted from the host. Stacks would disappear when the panel is updated and Docker could not see their files. Mount it with the same path on both sides (<code>{dir}:{dir}</code>) and set <code>STACKS_DIR</code> to it.',
   },
 
   pl: {
@@ -221,6 +222,7 @@ const dict = {
     'pw.new': 'Nowe hasło',
     'pw.submit': 'Zmień hasło',
     'pw.done': 'Hasło zmienione',
+    'warn.stacksDir': 'Folder stacków <code>{dir}</code> nie jest podpięty z hosta. Stacki znikną przy aktualizacji panelu, a Docker nie widzi ich plików. Podepnij go z tą samą ścieżką po obu stronach (<code>{dir}:{dir}</code>) i ustaw na nią <code>STACKS_DIR</code>.',
   },
 };
 

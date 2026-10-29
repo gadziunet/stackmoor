@@ -3,6 +3,7 @@ import path from 'node:path';
 import { docker, parseJsonLines } from './docker.js';
 import { normalizeCompose, addImageVolumes, isFileLikeTarget } from './compose.js';
 import { UserError } from './errors.js';
+import { publishedPorts, findConflicts, portFromDockerError } from './ports.js';
 
 export const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,62}$/;
 const COMPOSE_FILES = ['compose.yaml', 'compose.yml', 'docker-compose.yaml', 'docker-compose.yml'];
@@ -248,7 +249,19 @@ export function createStacks({ db, stacksDir, getSettings }) {
       }
     }
     if (missingFiles.length) throw new UserError('files.missing', { list: missingFiles.join('\n') });
+
+    await checkPorts(name, cfg);
     return file;
+  }
+
+  // Fails early with a readable message when a host port is already used by another container.
+  async function checkPorts(name, cfg) {
+    const wanted = publishedPorts(cfg);
+    if (!wanted.length) return;
+    const ps = await docker(['ps', '--format', '{{json .}}']);
+    if (ps.code !== 0) return; // let Docker report it
+    const conflicts = findConflicts(wanted, parseJsonLines(ps.stdout), name);
+    if (conflicts.length) throw new UserError('ports.conflicts', { conflicts });
   }
 
   // ---------- actions ----------
@@ -269,7 +282,11 @@ export function createStacks({ db, stacksDir, getSettings }) {
     const step = async (args) => {
       log(`$ docker compose ${args.join(' ')}\n`);
       const r = await docker([...base(name, file), ...args], { onData: log, signal });
-      if (r.code !== 0) throw new UserError('step.exitCode', { code: r.code });
+      if (r.code !== 0) {
+        const port = portFromDockerError(r.output);
+        if (port) throw new UserError('ports.inUseHost', { port });
+        throw new UserError('step.exitCode', { code: r.code });
+      }
     };
 
     let ok = false;

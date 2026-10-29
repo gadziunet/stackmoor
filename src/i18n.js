@@ -33,6 +33,9 @@ const messages = {
       'Missing configuration files that the app mounts as single files:\n{list}\n' +
       'Upload them to the stack folder and start again (Docker would create an empty folder in their place).',
     'remove.stopFailed': 'Could not stop the stack – nothing was deleted.',
+    'ports.conflicts': 'Some ports are already taken:\n{list}\nChange the host port – the left number in "ports:", e.g. "8080:80" → "8081:80" – and start again.',
+    'ports.line': '{svc}: port {port}/{protocol} is used by container "{container}" – {free} is free',
+    'ports.inUseHost': 'Port {port} is already in use on this server (by another program or container). Change the host port – the left number in "ports:" – and start again.',
 
     'log.pulling': 'Pulling image {image} to check where it stores data...',
     'log.created': '[volumes] created {path} (owner {owner})',
@@ -77,6 +80,9 @@ const messages = {
       'Brakuje plików konfiguracyjnych, które aplikacja montuje jako pojedyncze pliki:\n{list}\n' +
       'Wgraj je do folderu stacka i uruchom ponownie (Docker utworzyłby w ich miejscu pusty folder).',
     'remove.stopFailed': 'Nie udało się zatrzymać stacka – nic nie usunięto.',
+    'ports.conflicts': 'Niektóre porty są już zajęte:\n{list}\nZmień port hosta – lewą liczbę w „ports:”, np. "8080:80" → "8081:80" – i uruchom ponownie.',
+    'ports.line': '{svc}: port {port}/{protocol} zajmuje kontener „{container}” – wolny jest np. {free}',
+    'ports.inUseHost': 'Port {port} jest już zajęty na tym serwerze (przez inny program albo kontener). Zmień port hosta – lewą liczbę w „ports:” – i uruchom ponownie.',
 
     'log.pulling': 'Pobieram obraz {image}, żeby sprawdzić, gdzie trzyma dane...',
     'log.created': '[wolumeny] utworzono {path} (właściciel {owner})',
@@ -94,6 +100,9 @@ const messages = {
 };
 
 export function translate(lang, key, vars = {}) {
+  if (Array.isArray(vars.conflicts)) {
+    vars = { ...vars, list: vars.conflicts.map((c) => `  - ${translate(lang, 'ports.line', c)}`).join('\n') };
+  }
   const dict = messages[lang] || messages.en;
   const template = dict[key] ?? messages.en[key] ?? key;
   return template.replace(/\{(\w+)\}/g, (_m, name) => (name in vars ? String(vars[name]) : `{${name}}`));
