@@ -35,6 +35,12 @@ const MIGRATIONS = [
   );
   CREATE INDEX operations_stack ON operations(stack, id DESC);
   `,
+  `
+  CREATE TABLE state (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+  `,
 ];
 
 export const DEFAULT_SETTINGS = {
@@ -44,6 +50,10 @@ export const DEFAULT_SETTINGS = {
   // Host paths the panel does NOT move into the stack folder
   // (e.g. media libraries). They are not backed up.
   hostPathAllowlist: ['/mnt', '/media'],
+  // Update checks (nothing is ever updated without the user confirming).
+  updateCheck: true,
+  updateInterval: 'daily', // 'daily' | 'weekly'
+  updateCheckStacks: true,
 };
 
 export function openDb(file) {
@@ -90,4 +100,16 @@ export function saveSettings(db, patch) {
     }
   })();
   return getSettings(db);
+}
+
+// Small internal key/value store (update check results etc.), separate from user settings.
+export function getState(db, key, fallback = null) {
+  const row = db.prepare('SELECT value FROM state WHERE key = ?').get(key);
+  if (!row) return fallback;
+  try { return JSON.parse(row.value); } catch { return fallback; }
+}
+
+export function setState(db, key, value) {
+  db.prepare('INSERT INTO state(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+    .run(key, JSON.stringify(value));
 }

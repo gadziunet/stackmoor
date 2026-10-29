@@ -55,6 +55,7 @@ Automatic volumes can be turned off per stack.
 - [ ] Local domains through Caddy (API, wildcard certificates via DNS-01 or `tls internal`)
 - [ ] Cloudron-style backups – per stack, automatically before updates, database dumps, schedule, retention, encryption; restic to S3 / Backblaze B2; restore and clone
 - [ ] Setup wizard: fresh install or restore everything from a backup
+- [ ] Updates: check for new Moorline versions and new stack images (on/off in Settings), show what is new and update only after confirmation
 
 ## Development
 

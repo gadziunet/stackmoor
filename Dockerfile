@@ -22,6 +22,10 @@ COPY package.json ./
 COPY src ./src
 COPY public ./public
 
+# Version shown in the panel; set by CI from the git tag (e.g. 0.1.1) or "edge".
+ARG VERSION=dev
+ENV APP_VERSION=${VERSION}
+
 ENV NODE_ENV=production \
     PORT=5001 \
     DATA_DIR=/app/data \

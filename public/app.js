@@ -177,7 +177,8 @@ const LOGO = `<img src="/logo.svg" alt="" width="28" height="28">`;
 function route() {
   const h = location.hash.replace(/^#\/?/, '');
   if (h === 'new') return { page: 'new' };
-  if (h === 'settings') return { page: 'settings' };
+  const st = h.match(/^settings(?:\/([a-z]+))?$/);
+  if (st) return { page: 'settings', tab: st[1] || 'general' };
   const m = h.match(/^stack\/([a-z0-9_-]+)$/);
   if (m) return { page: 'stack', name: m[1] };
   return { page: 'home' };
@@ -189,6 +190,7 @@ function renderShell() {
       <div class="layout">
         <aside class="sidebar">
           <a class="brand" href="#/" title="${esc(t('home.title'))}">${LOGO}<span>Moorline</span></a><span class="version">${esc(state.version)}</span>
+          <a class="update-pill" id="panel-update" href="#/settings/updates" hidden></a>
           <a class="btn primary new" href="#/new">${t('nav.newStack')}</a>
           <ul class="stack-list" id="stack-list"></ul>
           <div class="sidebar-foot">
@@ -205,6 +207,7 @@ function renderShell() {
     });
   }
   renderStackList();
+  renderUpdateBadge();
   const warn = document.getElementById('global-warning');
   if (warn) {
     warn.innerHTML = state.stacksDirOk === false
@@ -221,6 +224,7 @@ function renderStackList() {
     ? state.stacks.map((s) => `
       <li><a href="#/stack/${esc(s.name)}" class="${s.name === current ? 'active' : ''}" title="${esc(stateLabel(s.state))}">
         <span class="dot ${s.state}"></span>${esc(s.name)}
+        ${s.updateAvailable ? `<span class="upd" title="${esc(t('upd.stackBadge'))}" aria-label="${esc(t('upd.stackBadge'))}">↑</span>` : ''}
         <span class="count">${s.total ? `${s.running}/${s.total}` : ''}</span>
       </a></li>`).join('')
     : `<li class="empty-hint">${t('nav.noStacks')}</li>`;
@@ -242,7 +246,7 @@ function renderHome() {
     <div class="head"><h1>${t('home.title')}</h1></div>
     ${state.stacks.length ? `<div class="home-grid">${state.stacks.map((s) => `
       <a class="card" href="#/stack/${esc(s.name)}"><span class="dot ${s.state}"></span>
-        <div><strong>${esc(s.name)}</strong><br><span class="hint">${esc(stateLabel(s.state))}${s.total ? ` · ${s.running}/${s.total}` : ''}</span></div>
+        <div><strong>${esc(s.name)}</strong><br><span class="hint">${esc(stateLabel(s.state))}${s.total ? ` · ${s.running}/${s.total}` : ''}${s.updateAvailable ? ` · ${t('upd.stackBadge')}` : ''}</span></div>
       </a>`).join('')}</div>`
     : `<div class="card"><h2>${t('home.emptyTitle')}</h2>
         <p class="hint">${t('home.emptyLead')}</p>
@@ -329,6 +333,15 @@ async function renderStack(name) {
     document.getElementById('notice').innerHTML = notices(state.pendingNotice.result);
     autostart = state.pendingNotice.autostart;
     state.pendingNotice = null;
+  }
+  const newImages = (state.updates?.stacks?.[name]?.images || []).filter((i) => i.updateAvailable);
+  if (summary.updateAvailable && newImages.length) {
+    document.getElementById('notice').insertAdjacentHTML('beforeend', `
+      <div class="notice info" id="stack-upd-box"><strong>${t('upd.stackTitle')}</strong>
+        <ul>${newImages.map((i) => `<li>${esc(i.svc)}: ${esc(i.image)}</li>`).join('')}</ul>
+        <p class="hint" style="margin:8px 0">${t('upd.stackLead')}</p>
+        <button class="btn primary small" id="stack-upd">${t('act.update')}</button>
+      </div>`);
   }
 
   let currentTab = 'compose';
@@ -525,15 +538,35 @@ async function renderStack(name) {
     runAction(b.dataset.act);
   }));
 
+  document.getElementById('stack-upd')?.addEventListener('click', () => {
+    if (!confirm(t('upd.stackConfirm', { name }))) return;
+    document.getElementById('stack-upd-box')?.remove();
+    runAction('update');
+  });
+
   tabs.compose();
   if (autostart) runAction('up');
 }
 
-async function renderSettings() {
+const SETTINGS_TABS = ['general', 'updates', 'backups', 'account'];
+
+async function renderSettings(tab = 'general') {
+  if (!SETTINGS_TABS.includes(tab)) tab = 'general';
   const main = document.getElementById('main');
-  const s = await api('GET', '/api/settings');
   main.innerHTML = `
     <div class="head"><h1>${t('set.title')}</h1></div>
+    <nav class="tabs" aria-label="${esc(t('set.title'))}">
+      ${SETTINGS_TABS.map((k) => `<a href="#/settings/${k}" class="${k === tab ? 'on' : ''}"${k === tab ? ' aria-current="page"' : ''}>${t(`set.tab.${k}`)}</a>`).join('')}
+    </nav>
+    <div id="set-body"><p class="hint">${t('stack.loading')}</p></div>`;
+  const body = document.getElementById('set-body');
+  const s = await api('GET', '/api/settings');
+  if (route().page !== 'settings') return;
+  ({ general: settingsGeneral, updates: settingsUpdates, backups: settingsBackups, account: settingsAccount })[tab](body, s);
+}
+
+function settingsGeneral(body, s) {
+  body.innerHTML = `
     <div class="card">
       <h2>${t('set.language')}</h2>
       ${langSelect('set-lang')}
@@ -550,13 +583,6 @@ async function renderSettings() {
         <p class="hint">${t('set.allowHint')}</p></div>
       <div id="s-out"></div>
       <button class="btn primary">${t('set.save')}</button>
-    </form>
-    <form class="card" id="pw">
-      <h2>${t('pw.title')}</h2>
-      <div class="field"><label for="cur">${t('pw.current')}</label><input type="password" id="cur" autocomplete="current-password" required></div>
-      <div class="field"><label for="nw">${t('pw.new')}</label><input type="password" id="nw" autocomplete="new-password" minlength="10" required></div>
-      <div id="pw-out"></div>
-      <button class="btn">${t('pw.submit')}</button>
     </form>`;
   bindLangSelect('set-lang');
   document.getElementById('settings').addEventListener('submit', async (e) => {
@@ -573,6 +599,151 @@ async function renderSettings() {
       document.getElementById('s-out').innerHTML = errorBox(err);
     }
   });
+}
+
+const fmtDate = (iso) => (iso ? new Date(iso).toLocaleString(lang === 'pl' ? 'pl-PL' : 'en-GB') : t('upd.never'));
+const showVersion = (v) => (!v ? '' : /^\d/.test(v) ? `v${v}` : v);
+
+function settingsUpdates(body, s) {
+  const u = state.updates || {};
+  const p = u.panel || {};
+  const mode = u.self?.mode || 'none';
+  const stackNames = u.stacksWithUpdates || [];
+
+  let panelBox = '';
+  if (p.updateAvailable) {
+    const howTo = mode === 'compose'
+      ? `<button class="btn primary" id="upd-apply">${t('upd.apply')}</button>`
+      : `<p class="hint">${t(`upd.how.${mode}`, { tag: esc(u.self?.tag || '') })}</p>`;
+    panelBox = `
+      <div class="notice info">
+        <strong>${p.buildUpdate ? t('upd.newBuild') : t('upd.newVersion', { version: esc(showVersion(p.latest)) })}</strong>
+        ${p.notes ? `<pre class="release-notes">${esc(p.notes)}</pre>` : ''}
+        ${p.url ? `<p><a href="${esc(p.url)}" target="_blank" rel="noopener">${t('upd.releaseLink')}</a></p>` : ''}
+        ${howTo}
+      </div>`;
+  } else if (p.checkedAt) {
+    panelBox = `<p class="hint">${p.error ? t('upd.checkError') : t('upd.upToDate')}</p>`;
+  }
+
+  body.innerHTML = `
+    <div class="card">
+      <h2>Moorline</h2>
+      <div class="kv">
+        <span>${t('upd.current')}</span><strong>${esc(showVersion(p.current || state.version.replace(/^v/, '')))}</strong>
+        <span>${t('upd.latest')}</span><strong>${esc(showVersion(p.latest) || '—')}</strong>
+        <span>${t('upd.lastCheck')}</span><span>${esc(fmtDate(u.lastRun))}</span>
+      </div>
+      ${panelBox}
+      <div id="upd-out"></div>
+      <button class="btn" id="upd-check">${t(u.checking ? 'upd.checking' : 'upd.checkNow')}</button>
+    </div>
+
+    <div class="card">
+      <h2>${t('upd.stacksTitle')}</h2>
+      ${stackNames.length
+        ? `<p class="hint">${t('upd.stacksLead')}</p><ul class="link-list">${stackNames.map((n) => `<li><a href="#/stack/${esc(n)}">${esc(n)}</a></li>`).join('')}</ul>`
+        : `<p class="hint">${u.lastRun ? t('upd.stacksNone') : t('upd.never')}</p>`}
+    </div>
+
+    <form class="card" id="upd-form">
+      <h2>${t('upd.settingsTitle')}</h2>
+      <label class="check field"><input type="checkbox" id="upd-on" ${s.updateCheck ? 'checked' : ''}>
+        <span>${t('upd.autoCheck')}</span></label>
+      <div class="field"><label for="upd-int">${t('upd.interval')}</label>
+        <select id="upd-int" class="lang">
+          <option value="daily" ${s.updateInterval === 'daily' ? 'selected' : ''}>${t('upd.daily')}</option>
+          <option value="weekly" ${s.updateInterval === 'weekly' ? 'selected' : ''}>${t('upd.weekly')}</option>
+        </select></div>
+      <label class="check field"><input type="checkbox" id="upd-stacks" ${s.updateCheckStacks ? 'checked' : ''}>
+        <span>${t('upd.checkStacks')} <span class="hint">${t('upd.checkStacksHint')}</span></span></label>
+      <p class="hint">${t('upd.neverAuto')}</p>
+      <div id="upd-form-out"></div>
+      <button class="btn primary">${t('set.save')}</button>
+    </form>`;
+
+  document.getElementById('upd-check').addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    e.target.textContent = t('upd.checking');
+    try {
+      state.updates = await api('POST', '/api/updates/check');
+      await refreshStacks();
+      renderUpdateBadge();
+      if (route().page === 'settings') settingsUpdates(body, s);
+    } catch (err) {
+      document.getElementById('upd-out').innerHTML = errorBox(err);
+      e.target.disabled = false;
+      e.target.textContent = t('upd.checkNow');
+    }
+  });
+
+  document.getElementById('upd-apply')?.addEventListener('click', async (e) => {
+    if (!confirm(t('upd.confirm', { version: showVersion(p.latest) || t('upd.newBuildShort') }))) return;
+    e.target.disabled = true;
+    const out = document.getElementById('upd-out');
+    try {
+      await api('POST', '/api/updates/apply');
+      out.innerHTML = `<div class="notice info">${t('upd.restarting')}</div>`;
+      waitForRestart();
+    } catch (err) {
+      out.innerHTML = errorBox(err);
+      e.target.disabled = false;
+    }
+  });
+
+  document.getElementById('upd-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      Object.assign(s, await api('PUT', '/api/settings', {
+        updateCheck: document.getElementById('upd-on').checked,
+        updateInterval: document.getElementById('upd-int').value,
+        updateCheckStacks: document.getElementById('upd-stacks').checked,
+      }));
+      document.getElementById('upd-form-out').innerHTML = '';
+      toast(t('set.saved'));
+    } catch (err) {
+      document.getElementById('upd-form-out').innerHTML = errorBox(err);
+    }
+  });
+}
+
+// After a self-update the panel restarts: wait until it answers again, then reload.
+function waitForRestart() {
+  const before = state.version;
+  let sawDown = false;
+  const started = Date.now();
+  const timer = setInterval(async () => {
+    try {
+      const st = await fetch('/api/state', { cache: 'no-store' }).then((r) => r.json());
+      const v = showVersion(st.version);
+      if (sawDown || v !== before) {
+        clearInterval(timer);
+        location.reload();
+      }
+    } catch {
+      sawDown = true;
+    }
+    if (Date.now() - started > 5 * 60e3) clearInterval(timer);
+  }, 3000);
+}
+
+function settingsBackups(body) {
+  body.innerHTML = `
+    <div class="card">
+      <h2>${t('bak.title')}</h2>
+      <p class="hint">${t('bak.soon')}</p>
+    </div>`;
+}
+
+function settingsAccount(body) {
+  body.innerHTML = `
+    <form class="card" id="pw">
+      <h2>${t('pw.title')}</h2>
+      <div class="field"><label for="cur">${t('pw.current')}</label><input type="password" id="cur" autocomplete="current-password" required></div>
+      <div class="field"><label for="nw">${t('pw.new')}</label><input type="password" id="nw" autocomplete="new-password" minlength="10" required></div>
+      <div id="pw-out"></div>
+      <button class="btn">${t('pw.submit')}</button>
+    </form>`;
   document.getElementById('pw').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
@@ -584,6 +755,14 @@ async function renderSettings() {
       document.getElementById('pw-out').innerHTML = errorBox(err);
     }
   });
+}
+
+function renderUpdateBadge() {
+  const el = document.getElementById('panel-update');
+  if (!el) return;
+  const p = state.updates?.panel;
+  el.hidden = !p?.updateAvailable;
+  el.textContent = p?.buildUpdate ? t('upd.badgeBuild') : t('upd.badge', { version: showVersion(p?.latest) });
 }
 
 // ---------- start ----------
@@ -598,7 +777,7 @@ function render() {
   renderShell();
   const r = route();
   if (r.page === 'new') renderNew();
-  else if (r.page === 'settings') renderSettings();
+  else if (r.page === 'settings') renderSettings(r.tab);
   else if (r.page === 'stack') renderStack(r.name);
   else renderHome();
 }
@@ -607,11 +786,12 @@ async function boot() {
   const s = await api('GET', '/api/state');
   state.user = s.user;
   state.needsSetup = s.needsSetup;
-  state.version = s.version ? `v${s.version}` : '';
+  state.version = !s.version ? '' : /^\d/.test(s.version) ? `v${s.version}` : s.version;
   state.stacksDir = s.stacksDir;
   state.stacksDirOk = s.stacksDirOk;
   if (state.user) {
     state.stacks = await api('GET', '/api/stacks').catch(() => []);
+    state.updates = await api('GET', '/api/updates').catch(() => null);
     clearInterval(state.refreshTimer);
     state.refreshTimer = setInterval(refreshStacks, 10_000);
   }

@@ -11,9 +11,10 @@ import { createStacks } from './stacks.js';
 import { UserError } from './errors.js';
 import { i18nMiddleware, translateAll } from './i18n.js';
 import { stacksDirMounted } from './mounts.js';
+import { createUpdates } from './updates.js';
+import { VERSION } from './version.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
 
 const config = {
   port: Number(process.env.PORT || 5001),
@@ -31,6 +32,8 @@ if (!stacksDirOk) {
   console.warn(`WARNING: ${config.stacksDir} is not mounted from the host – mount it at the same path and set STACKS_DIR.`);
 }
 const stacks = createStacks({ db, stacksDir: config.stacksDir, getSettings: () => getSettings(db) });
+const updates = createUpdates({ db, stacks, getSettings: () => getSettings(db) });
+updates.startScheduler();
 
 const app = express();
 app.disable('x-powered-by');
@@ -74,7 +77,7 @@ app.get('/api/state', (req, res) => {
   res.json({
     needsSetup: !hasUsers(),
     user: req.user ? { username: req.user.username } : null,
-    version: pkg.version,
+    version: VERSION,
     ...(req.user ? { stacksDir: config.stacksDir, stacksDirOk: stacksDirOk } : {}),
   });
 });
@@ -133,6 +136,12 @@ app.put('/api/settings', (req, res) => {
       patch[key] = n;
     }
   }
+  for (const key of ['updateCheck', 'updateCheckStacks']) {
+    if (req.body[key] !== undefined) patch[key] = Boolean(req.body[key]);
+  }
+  if (req.body.updateInterval !== undefined) {
+    patch.updateInterval = req.body.updateInterval === 'weekly' ? 'weekly' : 'daily';
+  }
   if (req.body.hostPathAllowlist !== undefined) {
     const list = Array.isArray(req.body.hostPathAllowlist) ? req.body.hostPathAllowlist : [];
     const clean = list.map((p) => String(p).trim()).filter(Boolean);
@@ -145,7 +154,10 @@ app.put('/api/settings', (req, res) => {
 
 // ---------- stacks ----------
 
-app.get('/api/stacks', wrap(async (_req, res) => res.json(await stacks.list())));
+app.get('/api/stacks', wrap(async (_req, res) => {
+  const withUpdates = new Set(updates.status().stacksWithUpdates);
+  res.json((await stacks.list()).map((s) => ({ ...s, updateAvailable: withUpdates.has(s.name) })));
+}));
 
 app.post('/api/stacks', wrap(async (req, res) => {
   const result = await stacks.save(req.body.name, req.body, { create: true });
@@ -166,6 +178,25 @@ app.post('/api/stacks/:name/actions/:action', wrap(async (req, res) => {
     .catch((err) => { write(req.t('log.error', { message: errorText(req, err) }) + '\n'); return false; });
   write(`\n__EXIT__:${ok ? 0 : 1}\n`);
   res.end();
+  // After updating images, refresh this stack's "update available" flag in the background.
+  if (ok && (req.params.action === 'update' || req.params.action === 'up')) {
+    updates.checkStack(req.params.name).catch(() => {});
+  }
+}));
+
+// ---------- updates ----------
+
+app.get('/api/updates', wrap(async (_req, res) => {
+  res.json({ ...updates.status(), self: await updates.selfInfo().then((s) => ({ mode: s.mode, tag: s.tag })) });
+}));
+
+app.post('/api/updates/check', wrap(async (_req, res) => {
+  await updates.checkAll();
+  res.json({ ...updates.status(), self: await updates.selfInfo().then((s) => ({ mode: s.mode, tag: s.tag })) });
+}));
+
+app.post('/api/updates/apply', wrap(async (_req, res) => {
+  res.json(await updates.updatePanel());
 }));
 
 app.get('/api/stacks/:name/logs', wrap(async (req, res) => {
@@ -216,6 +247,6 @@ app.use((err, req, res, _next) => {
 });
 
 app.listen(config.port, config.host, () => {
-  console.log(`Moorline ${pkg.version} listening on http://${config.host}:${config.port}`);
+  console.log(`Moorline ${VERSION} listening on http://${config.host}:${config.port}`);
   console.log(`Stacks: ${config.stacksDir}, panel data: ${config.dataDir}`);
 });

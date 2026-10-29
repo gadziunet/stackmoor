@@ -365,5 +365,14 @@ export function createStacks({ db, stacksDir, getSettings }) {
     return db.prepare('SELECT * FROM operations WHERE id = ?').get(id);
   }
 
-  return { list, get, save, action, logs, remove, operations, operationOutput, assertName };
+  // Images used by a stack (after variables are resolved), for update checks.
+  async function images(name) {
+    const file = requireStack(name);
+    const cfg = await resolvedConfig(name, file);
+    return Object.entries(cfg.services || {})
+      .filter(([, def]) => def.image)
+      .map(([svc, def]) => ({ svc, image: def.image }));
+  }
+
+  return { list, get, save, action, logs, remove, operations, operationOutput, assertName, images };
 }

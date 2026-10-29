@@ -64,6 +64,7 @@ Stack można utworzyć w istniejącym folderze bez `compose.yaml`, więc dane mo
 - [ ] Domeny lokalne przez Caddy (API, certyfikaty wildcard przez DNS-01 albo `tls internal`)
 - [ ] Backupy jak w Cloudronie – per stack, automatycznie przed aktualizacją, dumpy baz, harmonogram, retencja, szyfrowanie; restic do S3 / Backblaze B2; przywracanie i klonowanie
 - [ ] Kreator: nowa instalacja albo przywrócenie wszystkiego z backupu
+- [ ] Aktualizacje: sprawdzanie nowych wersji Moorline i nowych obrazów stacków (włączane w Ustawieniach), pokazanie co nowego i aktualizacja dopiero po potwierdzeniu
 
 ## Rozwój
 
