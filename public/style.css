@@ -134,12 +134,14 @@ textarea.env { min-height: 120px; }
 .link-list { margin: 8px 0 0; padding-left: 18px; }
 .link-list li { margin: 3px 0; }
 
+/* Fixed height: output scrolls inside the box, the page itself never grows or jumps. */
 .terminal {
   background: var(--term-bg); color: var(--term-text); border-radius: var(--radius);
-  padding: 12px 14px; margin: 0; max-height: 420px; min-height: 120px; overflow: auto;
+  padding: 12px 14px; margin: 0; height: min(360px, 50vh); overflow: auto;
+  overscroll-behavior: contain; box-sizing: border-box;
   white-space: pre-wrap; word-break: break-word;
 }
-.terminal.tall { max-height: 70vh; min-height: 300px; }
+.terminal.tall { height: 70vh; }
 
 .notice { border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 14px; }
 .notice ul { margin: 6px 0 0; padding-left: 18px; }

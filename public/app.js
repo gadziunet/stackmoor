@@ -430,8 +430,13 @@ async function renderStack(name) {
     },
 
     logs() {
+      const services = [...new Set((data.containers || []).map((c) => c.service).filter(Boolean))].sort();
       tab.innerHTML = `
         <div class="row" style="margin-bottom:10px">
+          ${services.length > 1 ? `<select id="log-svc" class="lang" aria-label="${esc(t('logs.service'))}">
+            <option value="">${t('logs.allServices')}</option>
+            ${services.map((x) => `<option value="${esc(x)}">${esc(x)}</option>`).join('')}
+          </select>` : ''}
           <label class="check" style="margin:0"><input type="checkbox" id="follow" checked> ${t('logs.live')}</label>
           <button class="btn small" id="reload">${t('logs.refresh')}</button>
         </div>
@@ -443,11 +448,13 @@ async function renderStack(name) {
         const ctl = new AbortController();
         state.abort = ctl;
         const follow = document.getElementById('follow').checked ? 1 : 0;
-        stream('GET', `/api/stacks/${name}/logs?tail=300&follow=${follow}`, (txt) => appendTo(pre, txt), ctl.signal)
+        const svc = document.getElementById('log-svc')?.value || '';
+        stream('GET', `/api/stacks/${name}/logs?tail=300&follow=${follow}${svc ? `&service=${encodeURIComponent(svc)}` : ''}`, (txt) => appendTo(pre, txt), ctl.signal)
           .catch((err) => { if (err.name !== 'AbortError') appendTo(pre, `\n${err.message}\n`); });
       };
       document.getElementById('reload').addEventListener('click', load);
       document.getElementById('follow').addEventListener('change', load);
+      document.getElementById('log-svc')?.addEventListener('change', load);
       load();
     },
 
@@ -1043,8 +1050,10 @@ function watchBackupJob(pre, done) {
     const st = await api('GET', '/api/backups/status').catch(() => null);
     if (!st) return setTimeout(tick, 3000);
     pre.hidden = false;
+    // Follow the end only if the user has not scrolled up to read.
+    const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
     pre.textContent = st.log || '';
-    pre.scrollTop = pre.scrollHeight;
+    if (atBottom) pre.scrollTop = pre.scrollHeight;
     if (st.running || st.queued) setTimeout(tick, 2000);
     else done?.(st);
   };

@@ -228,7 +228,7 @@ app.get('/api/stacks/:name/logs', wrap(async (req, res) => {
   stacks.assertName(req.params.name);
   const signal = abortOnClose(res);
   const write = openStream(res);
-  await stacks.logs(req.params.name, { tail: req.query.tail, follow: req.query.follow === '1' }, write, signal)
+  await stacks.logs(req.params.name, { tail: req.query.tail, follow: req.query.follow === '1', service: String(req.query.service || '') }, write, signal)
     .catch((err) => write(req.t('log.error', { message: errorText(req, err) }) + '\n'));
   res.end();
 }));

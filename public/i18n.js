@@ -83,6 +83,8 @@ const dict = {
     'ct.empty': 'No containers – the stack has not been started yet or was shut down.',
 
     'logs.live': 'Live',
+    'logs.service': 'Service',
+    'logs.allServices': 'All services',
     'logs.refresh': 'Refresh',
 
     'hist.action': 'Action',
@@ -348,6 +350,8 @@ const dict = {
     'ct.empty': 'Brak kontenerów – stack nie był jeszcze uruchomiony albo został wyłączony.',
 
     'logs.live': 'Na żywo',
+    'logs.service': 'Usługa',
+    'logs.allServices': 'Wszystkie usługi',
     'logs.refresh': 'Odśwież',
 
     'hist.action': 'Akcja',

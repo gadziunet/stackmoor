@@ -341,11 +341,15 @@ export function createStacks({ db, stacksDir, getSettings }) {
     return ok;
   }
 
-  async function logs(name, { tail = 200, follow = false }, write, signal) {
+  async function logs(name, { tail = 200, follow = false, service = '' }, write, signal) {
     const file = requireStack(name);
     const n = Math.min(Math.max(parseInt(tail, 10) || 200, 1), 5000);
     const args = [...base(name, file), 'logs', '--no-color', '--timestamps', '--tail', String(n)];
     if (follow) args.push('--follow');
+    if (service) {
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(service)) throw new UserError('dns.badService', { service });
+      args.push('--', service);
+    }
     await docker(args, { onData: write, signal });
   }
 
