@@ -1,0 +1,22 @@
+{
+  "name": "stackpanel",
+  "version": "0.1.0",
+  "description": "Prosty webowy panel do Docker Compose z automatycznymi wolumenami (etap 1: stacki).",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "express": "^4.21.2",
+    "yaml": "^2.7.0"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}

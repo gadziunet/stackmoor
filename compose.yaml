@@ -1,0 +1,19 @@
+# Uruchomienie panelu na serwerze.
+# WAŻNE: folder stacków musi być zamontowany pod TĄ SAMĄ ścieżką w kontenerze
+# co na hoście (/opt/stacks:/opt/stacks), bo panel przekazuje ścieżki Dockerowi na hoście.
+services:
+  stackpanel:
+    build: .
+    # Po zbudowaniu w swoim rejestrze możesz zamienić "build" na np.:
+    # image: registry.twojadomena.pl/gadziunet/stackpanel:latest
+    container_name: stackpanel
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    environment:
+      - STACKS_DIR=/opt/stacks
+      - TZ=Europe/Warsaw
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt/stacks:/opt/stacks
+      - ./data:/app/data
