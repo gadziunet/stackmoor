@@ -2,20 +2,21 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
-import { openDb, getSettings, saveSettings } from './db.js';
+import { openDb, getSettings, saveSettings, getState, setState } from './db.js';
 import {
   hashPassword, verifyPassword, validatePassword, createSession, destroySession,
   sessionMiddleware, requireAuth, requireAppHeader, loginRateLimit,
 } from './auth.js';
 import { createStacks } from './stacks.js';
 import { UserError } from './errors.js';
-import { i18nMiddleware, translateAll } from './i18n.js';
+import { i18nMiddleware, translateAll, translate } from './i18n.js';
 import { stacksDirMounted } from './mounts.js';
 import { createUpdates } from './updates.js';
 import { VERSION } from './version.js';
 import { initSecrets } from './secrets.js';
 import { createDomains } from './domains.js';
 import { createPanelLock } from './panel-lock.js';
+import { createBackups } from './backups.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -38,6 +39,10 @@ if (!stacksDirOk) {
 const stacks = createStacks({ db, stacksDir: config.stacksDir, getSettings: () => getSettings(db) });
 const updates = createUpdates({ db, stacks, getSettings: () => getSettings(db) });
 updates.startScheduler();
+// Language for things that run on their own (scheduled backups): the one the admin last used.
+let lastLang = getState(db, 'ui.lang', 'en');
+const backups = createBackups({ db, stacks, stacksDir: config.stacksDir, dataDir: config.dataDir, sqlite: db });
+backups.startScheduler(() => (key, vars) => translate(lastLang, key, vars));
 const domains = createDomains({
   db, stacks, stacksDir: config.stacksDir,
   getSettings: () => getSettings(db),
@@ -125,6 +130,10 @@ app.post('/api/logout', (req, res) => {
 });
 
 app.use('/api', requireAuth);
+app.use('/api', (req, _res, next) => {
+  if (req.lang !== lastLang) { lastLang = req.lang; setState(db, 'ui.lang', lastLang); }
+  next();
+});
 
 app.post('/api/password', (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
@@ -233,6 +242,52 @@ app.delete('/api/stacks/:name', wrap(async (req, res) => {
     if (getSettings(db).domain) await domains.apply(() => {}, req.t).catch(() => {});
   }
   res.json({ ok: true, output: lines.join('') });
+}));
+
+// ---------- backups ----------
+
+// Long jobs run in the background; the UI polls /api/backups/status.
+const background = (p) => { p.catch(() => {}); };
+
+app.get('/api/backups', wrap(async (_req, res) => {
+  res.json({ config: backups.publicConfig(), status: backups.status() });
+}));
+
+app.put('/api/backups', wrap(async (req, res) => res.json(backups.saveConfig(req.body || {}))));
+
+app.post('/api/backups/test', wrap(async (_req, res) => res.json(await backups.test())));
+
+app.post('/api/backups/reveal', (_req, res) => res.json({ password: backups.revealPassword() }));
+
+app.get('/api/backups/status', (_req, res) => res.json(backups.status()));
+
+app.get('/api/backups/snapshots', wrap(async (req, res) => {
+  const list = await backups.snapshots({ fresh: req.query.fresh === '1' });
+  res.json(req.query.stack ? list.filter((s) => s.stack === req.query.stack) : list);
+}));
+
+app.post('/api/backups/run', (req, res) => {
+  background(backups.runAll('manual', req.t));
+  res.status(202).json({ ok: true });
+});
+
+app.post('/api/backups/verify', (req, res) => {
+  background(backups.verifyNow(req.t));
+  res.status(202).json({ ok: true });
+});
+
+app.post('/api/stacks/:name/backup', (req, res) => {
+  stacks.assertName(req.params.name);
+  background(backups.backupOne(req.params.name, req.t));
+  res.status(202).json({ ok: true });
+});
+
+app.post('/api/backups/restore', wrap(async (req, res) => {
+  const target = String(req.body?.target || '');
+  if (!target || req.body?.confirm !== target) return fail(req, res, 400, 'delete.confirm');
+  stacks.assertName(target);
+  background(backups.restore(String(req.body.snapshot || ''), target, req.t));
+  res.status(202).json({ ok: true });
 }));
 
 // ---------- domains ----------

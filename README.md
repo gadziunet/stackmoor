@@ -65,13 +65,26 @@ Stackmoor runs Caddy in its own container (`stackmoor-caddy`) with one wildcard 
 docker exec stackmoor node src/cli.js unlock
 ```
 
+## Backups
+
+**Settings → Backups:** choose the storage (Backblaze B2, Amazon S3, Cloudflare R2, Hetzner, Wasabi or any S3-compatible), paste the keys, set an encryption password, the days and time, and how many backups to keep.
+
+- **One encrypted repository** ([restic](https://restic.net)) in your bucket holds all stacks and the panel's own settings. Files that did not change are not uploaded again.
+- **Databases are dumped first** (PostgreSQL, MySQL/MariaDB, MongoDB; Redis is saved), while the apps keep running. The dump is backed up instead of the database's raw files. A service can set the type itself with the label `stackmoor.backup.dump: postgres|mysql|mongo|redis|none`.
+- **Before every update** the stack is backed up; if the backup fails, the update does not run.
+- **Checksums:** restic stores every piece of data under its SHA-256 checksum. Every run checks the repository, once a week 10% of the data is read back and compared, and *Verify everything* checks all of it.
+- **Retention:** daily, weekly and monthly backups to keep; older ones are removed automatically.
+- **Restore** from the stack's *Backups* tab: the current folder goes to the trash, the files come back, databases are loaded from their dumps and the stack starts. Restoring under a different name makes a copy.
+
+> Keep the encryption password safe. Without it nobody can restore the backups.
+
 ## Roadmap
 
 - [x] Stacks, editor, automatic volumes, logs
 - [x] Local domains through Caddy – wildcard certificate via your DNS provider's API (14 providers) or an internal CA
-- [ ] Cloudron-style backups – per stack, automatically before updates, database dumps, schedule, retention, encryption; restic to S3 / Backblaze B2; restore and clone
+- [x] Cloudron-style backups – per stack, automatically before updates, database dumps, schedule, retention, encryption; restic to S3 / Backblaze B2; restore and clone
 - [ ] Setup wizard: fresh install or restore everything from a backup
-- [ ] Updates: check for new Stackmoor versions and new stack images (on/off in Settings), show what is new and update only after confirmation
+- [x] Updates: check for new Stackmoor versions and new stack images (on/off in Settings), show what is new and update only after confirmation
 
 ## Development
 

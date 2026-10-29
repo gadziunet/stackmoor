@@ -74,13 +74,26 @@ Stackmoor uruchamia Caddy we własnym kontenerze (`stackmoor-caddy`) z jednym ce
 docker exec stackmoor node src/cli.js unlock
 ```
 
+## Kopie zapasowe
+
+**Ustawienia → Backup:** wybierz magazyn (Backblaze B2, Amazon S3, Cloudflare R2, Hetzner, Wasabi albo dowolny zgodny z S3), wklej klucze, ustaw hasło szyfrowania, dni i godzinę oraz ile kopii trzymać.
+
+- **Jedno zaszyfrowane repozytorium** ([restic](https://restic.net)) w Twoim buckecie mieści wszystkie stacki i ustawienia samego panelu. Niezmienione pliki nie są wysyłane ponownie.
+- **Najpierw zrzuty baz danych** (PostgreSQL, MySQL/MariaDB, MongoDB; Redis jest zapisywany), a aplikacje działają dalej. Do kopii trafia zrzut zamiast surowych plików bazy. Usługa może sama wskazać typ etykietą `stackmoor.backup.dump: postgres|mysql|mongo|redis|none`.
+- **Przed każdą aktualizacją** robiona jest kopia stacka; jeśli się nie uda, aktualizacja się nie wykona.
+- **Sumy kontrolne:** restic zapisuje każdy kawałek danych pod jego sumą SHA-256. Każde uruchomienie sprawdza repozytorium, raz w tygodniu 10% danych jest pobierane i porównywane, a *Zweryfikuj wszystko* sprawdza całość.
+- **Rotacja:** ile kopii dziennych, tygodniowych i miesięcznych trzymać; starsze są usuwane automatycznie.
+- **Przywracanie** z zakładki *Kopie* w stacku: obecny folder trafia do kosza, pliki wracają, bazy są wczytywane ze zrzutów, a stack się uruchamia. Przywrócenie pod inną nazwą tworzy kopię.
+
+> Przechowuj hasło szyfrowania w bezpiecznym miejscu. Bez niego nikt nie przywróci kopii.
+
 ## Plan
 
 - [x] Stacki, edytor, automatyczne wolumeny, logi
 - [x] Domeny lokalne przez Caddy – certyfikat wildcard przez API dostawcy DNS (14 dostawców) albo wewnętrzny CA
-- [ ] Backupy jak w Cloudronie – per stack, automatycznie przed aktualizacją, dumpy baz, harmonogram, retencja, szyfrowanie; restic do S3 / Backblaze B2; przywracanie i klonowanie
+- [x] Backupy jak w Cloudronie – per stack, automatycznie przed aktualizacją, dumpy baz, harmonogram, retencja, szyfrowanie; restic do S3 / Backblaze B2; przywracanie i klonowanie
 - [ ] Kreator: nowa instalacja albo przywrócenie wszystkiego z backupu
-- [ ] Aktualizacje: sprawdzanie nowych wersji Stackmoor i nowych obrazów stacków (włączane w Ustawieniach), pokazanie co nowego i aktualizacja dopiero po potwierdzeniu
+- [x] Aktualizacje: sprawdzanie nowych wersji Stackmoor i nowych obrazów stacków (włączane w Ustawieniach), pokazanie co nowego i aktualizacja dopiero po potwierdzeniu
 
 ## Rozwój
 

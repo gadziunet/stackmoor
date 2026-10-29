@@ -30,6 +30,8 @@ function parseLsStatus(status = '') {
 // t = translate function from i18n.js, passed in from the request (user's language).
 export function createStacks({ db, stacksDir, getSettings }) {
   const locks = new Set();
+  // Set by other modules (backups): hooks.beforeUpdate(name, log, t).
+  const hooks = {};
 
   const stackDir = (name) => path.join(stacksDir, name);
 
@@ -310,7 +312,8 @@ export function createStacks({ db, stacksDir, getSettings }) {
           await step(['up', '-d', '--remove-orphans']);
           break;
         case 'update':
-          // TODO: automatic backup before update (backups milestone).
+          // Backup first (if set up); a failed backup stops the update.
+          if (hooks.beforeUpdate) await hooks.beforeUpdate(name, log, t);
           await step(['pull']);
           file = await prepare(name, log, t);
           await step(['up', '-d', '--remove-orphans']);
@@ -392,5 +395,30 @@ export function createStacks({ db, stacksDir, getSettings }) {
     return resolvedConfig(name, requireStack(name));
   }
 
-  return { list, get, save, action, logs, remove, operations, operationOutput, assertName, images, config, stackDir };
+  /** Runs fn while the stack is locked (no start/stop/update at the same time). */
+  async function exclusive(name, fn) {
+    if (locks.has(name)) throw new UserError('stack.busy', {}, 409);
+    locks.add(name);
+    try { return await fn(); } finally { locks.delete(name); }
+  }
+
+  /** `docker compose <args>` for an existing stack. */
+  async function compose(name, args, log = () => {}) {
+    const file = requireStack(name);
+    log(`$ docker compose ${args.join(' ')}\n`);
+    return docker([...base(name, file), ...args], { onData: log });
+  }
+
+  /** Records a finished operation (e.g. a restore) in the stack's history. */
+  function recordOperation(name, act, ok, output) {
+    db.prepare(`INSERT INTO operations(stack, action, status, output, finished_at) VALUES (?, ?, ?, ?, datetime('now'))`)
+      .run(name, act, ok ? 'ok' : 'error', String(output).slice(-60_000));
+  }
+
+  const exists = (name) => NAME_RE.test(String(name || '')) && Boolean(composeFile(name));
+
+  return {
+    list, get, save, action, logs, remove, operations, operationOutput, assertName, images, config, stackDir,
+    hooks, exclusive, compose, prepare, recordOperation, exists, isBusy: (name) => locks.has(name),
+  };
 }

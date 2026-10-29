@@ -329,7 +329,7 @@ async function renderStack(name) {
     <div id="notice"></div>
     <div id="op-wrap" hidden><h2 id="op-title">${t('act.operation')}</h2><pre class="terminal" id="op"></pre><br></div>
     <div class="tabs" role="tablist">
-      ${['compose', 'env', 'domain', 'containers', 'logs', 'history', 'delete']
+      ${['compose', 'env', 'domain', 'containers', 'logs', 'backups', 'history', 'delete']
         .map((k, i) => `<button data-tab="${k}" class="${i === 0 ? 'on' : ''}">${t(`tab.${k}`)}</button>`).join('')}
     </div>
     <div id="tab"></div>`;
@@ -449,6 +449,50 @@ async function renderStack(name) {
       document.getElementById('reload').addEventListener('click', load);
       document.getElementById('follow').addEventListener('change', load);
       load();
+    },
+
+    async backups() {
+      tab.innerHTML = `<p class="hint">${t('stack.loading')}</p>`;
+      const b = await api('GET', '/api/backups').catch(() => null);
+      if (currentTab !== 'backups') return;
+      if (!b?.config?.configured) {
+        tab.innerHTML = `<div class="card"><p class="hint">${t('bak.notConfigured')}</p>
+          <a class="btn" href="#/settings/backups">${t('bak.goSettings')}</a></div>`;
+        return;
+      }
+      tab.innerHTML = `
+        <div class="card">
+          <div class="row"><button type="button" class="btn primary" id="sb-run">${t('bak.runStack')}</button>
+            <span class="hint">${t('bak.stackLead')}</span></div>
+          <pre class="terminal" id="sb-log" hidden></pre>
+        </div>
+        <div class="card"><h2>${t('bak.snapshots')}</h2><div id="sb-snaps"><p class="hint">${t('stack.loading')}</p></div></div>`;
+      const loadSnaps = async () => {
+        const box = document.getElementById('sb-snaps');
+        const list = await api('GET', `/api/backups/snapshots?stack=${encodeURIComponent(name)}&fresh=1`)
+          .catch((err) => { box.innerHTML = errorBox(err); return null; });
+        if (list && currentTab === 'backups') {
+          snapshotsTable(box, list, {
+            showStack: false,
+            onRestored: (target) => { if (target !== name) location.hash = `#/stack/${target}`; else loadSnaps(); },
+          });
+        }
+      };
+      const runBtn = document.getElementById('sb-run');
+      const follow = () => {
+        runBtn.disabled = true;
+        watchBackupJob(document.getElementById('sb-log'), (st) => {
+          runBtn.disabled = false;
+          toast(t(st.history?.[0]?.ok ? 'toast.done' : 'toast.failed'));
+          loadSnaps();
+        });
+      };
+      runBtn.addEventListener('click', async () => {
+        try { await api('POST', `/api/stacks/${name}/backup`); } catch (err) { toast(err.message); return; }
+        follow();
+      });
+      if (b.status.running || b.status.queued) follow();
+      loadSnaps();
     },
 
     async history() {
@@ -975,12 +1019,290 @@ async function settingsDomains(body) {
   });
 }
 
-function settingsBackups(body) {
-  body.innerHTML = `
+// ---------- backups ----------
+
+const fmtBytes = (n) => {
+  if (n === null || n === undefined) return '';
+  const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let i = 0;
+  let v = Number(n);
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i += 1; }
+  return `${v.toFixed(v < 10 && i ? 1 : 0)} ${u[i]}`;
+};
+
+// Monday first; 0 = Sunday as in JavaScript.
+const WEEK = [1, 2, 3, 4, 5, 6, 0];
+const dayName = (d) => new Intl.DateTimeFormat(lang === 'pl' ? 'pl-PL' : 'en-GB', { weekday: 'short' })
+  .format(new Date(Date.UTC(2026, 0, 4 + d))); // 2026-01-04 was a Sunday
+
+/** Shows the running backup job's log in `pre` until it finishes, then calls done(). */
+function watchBackupJob(pre, done) {
+  let stopped = false;
+  const tick = async () => {
+    if (stopped || !document.body.contains(pre)) return;
+    const st = await api('GET', '/api/backups/status').catch(() => null);
+    if (!st) return setTimeout(tick, 3000);
+    pre.hidden = false;
+    pre.textContent = st.log || '';
+    pre.scrollTop = pre.scrollHeight;
+    if (st.running || st.queued) setTimeout(tick, 2000);
+    else done?.(st);
+  };
+  tick();
+  return () => { stopped = true; };
+}
+
+function backupRunLabel(h) {
+  const what = h.stack ? `${t(`bak.kind.${h.kind}`)} · ${esc(h.stack)}` : t(`bak.kind.${h.kind}`);
+  const res = h.ok ? `<span class="badge running">✓</span>` : `<span class="badge exited">✕</span>`;
+  const fail = h.failed?.length ? ` <span class="hint">${t('bak.failedFor', { list: esc(h.failed.join(', ')) })}</span>` : '';
+  return `<tr><td>${fmtDate(h.at)}</td><td>${what}</td><td>${res}${fail}${h.error ? `<div class="hint" style="white-space:pre-wrap">${esc(h.error)}</div>` : ''}</td></tr>`;
+}
+
+/** Table of snapshots with restore. onRestored() runs after a restore finishes. */
+function snapshotsTable(box, list, { showStack, onRestored }) {
+  if (!list.length) {
+    box.innerHTML = `<p class="hint">${t('bak.noSnapshots')}</p>`;
+    return;
+  }
+  box.innerHTML = `
+    <table class="snapshots"><thead><tr>
+      ${showStack ? `<th>${t('bak.stack')}</th>` : ''}<th>${t('bak.date')}</th><th>${t('bak.size')}</th><th></th>
+    </tr></thead><tbody>
+    ${list.map((sn) => `<tr>
+      ${showStack ? `<td>${esc(sn.stack)}</td>` : ''}
+      <td>${fmtDate(sn.time)}${sn.preUpdate ? ` <span class="badge partial">${t('bak.preUpdate')}</span>` : ''}</td>
+      <td class="hint">${fmtBytes(sn.size)}</td>
+      <td><button type="button" class="btn small" data-restore="${esc(sn.id)}" data-stack="${esc(sn.stack)}">${t('bak.restore')}</button></td>
+    </tr>`).join('')}
+    </tbody></table>
+    <form class="notice warn" id="restore-form" hidden>
+      <strong id="restore-title"></strong>
+      <p style="margin:6px 0">${t('bak.restoreLead')}</p>
+      <div class="field"><label for="rs-target">${t('bak.restoreTarget')}</label>
+        <input type="text" id="rs-target" autocapitalize="off" autocomplete="off">
+        <p class="hint">${t('bak.restoreTargetHint')}</p></div>
+      <div class="field"><label for="rs-confirm">${t('bak.restoreConfirm')}</label>
+        <input type="text" id="rs-confirm" autocapitalize="off" autocomplete="off"></div>
+      <div id="rs-out"></div>
+      <div class="row"><button class="btn primary">${t('bak.restoreGo')}</button>
+        <button type="button" class="btn" id="rs-cancel">${t('bak.cancel')}</button></div>
+    </form>
+    <pre class="terminal" id="rs-log" hidden></pre>`;
+  const form = box.querySelector('#restore-form');
+  let snapshot = null;
+  box.querySelectorAll('[data-restore]').forEach((b) => b.addEventListener('click', () => {
+    snapshot = b.dataset.restore;
+    const sn = list.find((x) => x.id === snapshot);
+    form.hidden = false;
+    box.querySelector('#restore-title').textContent = t('bak.restoreTitle', { stack: sn.stack, date: fmtDate(sn.time) });
+    box.querySelector('#rs-target').value = sn.stack;
+    box.querySelector('#rs-confirm').value = '';
+    box.querySelector('#rs-confirm').focus();
+  }));
+  box.querySelector('#rs-cancel').addEventListener('click', () => { form.hidden = true; });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const target = box.querySelector('#rs-target').value.trim();
+    try {
+      await api('POST', '/api/backups/restore', { snapshot, target, confirm: box.querySelector('#rs-confirm').value.trim() });
+    } catch (err) {
+      box.querySelector('#rs-out').innerHTML = errorBox(err);
+      return;
+    }
+    form.hidden = true;
+    box.querySelectorAll('[data-restore]').forEach((b) => (b.disabled = true));
+    watchBackupJob(box.querySelector('#rs-log'), (st) => {
+      const last = st.history?.[0];
+      toast(t(last?.ok ? 'toast.done' : 'toast.failed'));
+      refreshStacks().catch(() => {});
+      onRestored?.(target, last?.ok);
+    });
+  });
+}
+
+async function settingsBackups(body) {
+  let d;
+  try {
+    d = await api('GET', '/api/backups');
+  } catch (err) {
+    body.innerHTML = errorBox(err);
+    return;
+  }
+  if (route().page !== 'settings') return;
+  const c = d.config;
+  const st = d.status;
+  const last = st.history?.find((h) => h.kind !== 'restore' && h.kind !== 'verify');
+  const verify = st.verifyData || st.verify;
+
+  const statusBox = !c.configured ? '' : `
     <div class="card">
-      <h2>${t('bak.title')}</h2>
-      <p class="hint">${t('bak.soon')}</p>
+      <h2>${t('bak.status')}</h2>
+      <div class="kv">
+        <span>${t('bak.lastRun')}</span><strong>${last ? `${last.ok ? '✓' : '✕'} ${fmtDate(last.at)}` : t('upd.never')}</strong>
+        <span>${t('bak.checksums')}</span><strong>${verify ? `${verify.ok ? '✓' : '✕'} ${fmtDate(verify.at)} · ${t(`bak.mode.${verify.mode}`)}` : t('upd.never')}</strong>
+        <span>${t('bak.schedule')}</span><strong>${c.enabled && c.days.length ? `${WEEK.filter((x) => c.days.includes(x)).map(dayName).join(', ')} · ${esc(c.time)}` : t('bak.off')}</strong>
+      </div>
+      ${verify && !verify.ok ? `<div class="notice error">${t('bak.verifyBad')}\n${esc(verify.error || '')}</div>` : ''}
+      <div class="row">
+        <button type="button" class="btn primary" id="bak-run">${t('bak.runNow')}</button>
+        <button type="button" class="btn" id="bak-verify" title="${esc(t('bak.verifyTitle'))}">${t('bak.verifyNow')}</button>
+      </div>
+      <pre class="terminal" id="bak-log" hidden></pre>
+      ${st.history?.length ? `<details style="margin-top:12px"><summary>${t('bak.history')}</summary>
+        <table><tbody>${st.history.map(backupRunLabel).join('')}</tbody></table></details>` : ''}
     </div>`;
+
+  const destOptions = c.destinations.map((x) => `<option value="${esc(x.id)}" ${x.id === c.destination ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
+  body.innerHTML = `
+    ${statusBox}
+    <form class="card" id="bak-form">
+      <h2>${t('bak.storage')}</h2>
+      <p class="hint" style="margin-top:-4px">${t('bak.lead')}</p>
+      <div class="field"><label for="bk-dest">${t('bak.destination')}</label>
+        <select id="bk-dest" class="lang">${destOptions}</select>
+        <p class="hint" id="bk-help"></p></div>
+      <div class="row field">
+        <div style="flex:3;min-width:220px"><label for="bk-endpoint">${t('bak.endpoint')}</label>
+          <input type="text" id="bk-endpoint" value="${esc(c.endpoint)}" autocapitalize="off" autocomplete="off"></div>
+        <div style="flex:1;min-width:120px"><label for="bk-region">${t('bak.region')}</label>
+          <input type="text" id="bk-region" value="${esc(c.region)}" autocapitalize="off" autocomplete="off"></div>
+      </div>
+      <div class="row field">
+        <div style="flex:2;min-width:180px"><label for="bk-bucket">${t('bak.bucket')}</label>
+          <input type="text" id="bk-bucket" value="${esc(c.bucket)}" autocapitalize="off" autocomplete="off"></div>
+        <div style="flex:1;min-width:120px"><label for="bk-prefix">${t('bak.prefix')}</label>
+          <input type="text" id="bk-prefix" value="${esc(c.prefix)}" autocapitalize="off" autocomplete="off"></div>
+      </div>
+      <div class="field"><label for="bk-ak">${t('bak.accessKey')}</label>
+        <input type="text" id="bk-ak" value="${esc(c.accessKey)}" autocapitalize="off" autocomplete="off"></div>
+      <div class="field"><label for="bk-sk">${t('bak.secretKey')}</label>
+        <input type="password" id="bk-sk" placeholder="${esc(c.secretKey)}" autocomplete="off"></div>
+
+      <h2 style="margin-top:22px">${t('bak.encryption')}</h2>
+      <div class="field"><label for="bk-pw">${t('bak.password')}</label>
+        <div class="row" style="flex-wrap:nowrap">
+          <input type="password" id="bk-pw" placeholder="${esc(c.password)}" autocomplete="new-password" style="flex:1;min-width:0">
+          <button type="button" class="btn" id="bk-gen">${t('bak.generate')}</button>
+          ${c.password ? `<button type="button" class="btn" id="bk-show">${t('bak.show')}</button>` : ''}
+        </div></div>
+      <div class="notice warn">${t('bak.passwordWarn')}</div>
+
+      <h2 style="margin-top:22px">${t('bak.scheduleTitle')}</h2>
+      <label class="check field"><input type="checkbox" id="bk-enabled" ${c.enabled ? 'checked' : ''}> ${t('bak.enabled')}</label>
+      <div class="field"><label>${t('bak.days')}</label>
+        <div class="row days">${WEEK.map((x) => `<label class="check"><input type="checkbox" class="bk-day" value="${x}" ${c.days.includes(x) ? 'checked' : ''}> ${esc(dayName(x))}</label>`).join('')}</div></div>
+      <div class="field" style="max-width:180px"><label for="bk-time">${t('bak.time')}</label>
+        <input type="time" id="bk-time" value="${esc(c.time)}"></div>
+      <p class="hint field">${t('bak.timeZone', { zone: esc(Intl.DateTimeFormat().resolvedOptions().timeZone) })}</p>
+
+      <h2 style="margin-top:22px">${t('bak.retention')}</h2>
+      <p class="hint" style="margin-top:-4px">${t('bak.retentionLead')}</p>
+      <div class="row field">
+        <div style="flex:1;min-width:110px"><label for="bk-kd">${t('bak.keepDaily')}</label><input type="number" min="0" id="bk-kd" value="${esc(c.keepDaily)}"></div>
+        <div style="flex:1;min-width:110px"><label for="bk-kw">${t('bak.keepWeekly')}</label><input type="number" min="0" id="bk-kw" value="${esc(c.keepWeekly)}"></div>
+        <div style="flex:1;min-width:110px"><label for="bk-km">${t('bak.keepMonthly')}</label><input type="number" min="0" id="bk-km" value="${esc(c.keepMonthly)}"></div>
+      </div>
+      <label class="check field"><input type="checkbox" id="bk-before" ${c.beforeUpdate ? 'checked' : ''}> ${t('bak.beforeUpdate')}</label>
+      <label class="check field"><input type="checkbox" id="bk-vw" ${c.verifyWeekly ? 'checked' : ''}> ${t('bak.verifyWeekly')}</label>
+
+      <div id="bk-out"></div>
+      <button class="btn primary">${t('bak.saveTest')}</button>
+    </form>
+    ${c.configured ? `<div class="card"><h2>${t('bak.snapshots')}</h2><div id="bk-snaps"><p class="hint">${t('stack.loading')}</p></div></div>` : ''}`;
+
+  // Destination presets: help text, and the address filled in from the region.
+  const epFor = (dest, region) => (dest?.endpoint && !dest.endpoint.includes('<') ? dest.endpoint.replace('{region}', region) : '');
+  let autoEp = null;
+  const drawDest = (fill) => {
+    const dest = c.destinations.find((x) => x.id === document.getElementById('bk-dest').value);
+    document.getElementById('bk-help').textContent = dest?.help?.[lang] || dest?.help?.en || '';
+    const ep = document.getElementById('bk-endpoint');
+    const rg = document.getElementById('bk-region');
+    if (fill) {
+      rg.value = dest?.region || '';
+      ep.value = epFor(dest, rg.value);
+      autoEp = ep.value;
+    } else if (autoEp !== null && ep.value === autoEp) {
+      ep.value = epFor(dest, rg.value);
+      autoEp = ep.value;
+    }
+    ep.placeholder = (dest?.endpoint || 'minio.example.com:9000').replace('{region}', rg.value || dest?.region || '');
+  };
+  drawDest(!c.endpoint);
+  document.getElementById('bk-dest').addEventListener('change', () => drawDest(true));
+  document.getElementById('bk-region').addEventListener('input', () => drawDest(false));
+
+  document.getElementById('bk-gen').addEventListener('click', () => {
+    const abc = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const bytes = crypto.getRandomValues(new Uint8Array(28));
+    const pw = Array.from(bytes, (b) => abc[b % abc.length]).join('');
+    const el = document.getElementById('bk-pw');
+    el.type = 'text';
+    el.value = pw;
+    el.select();
+  });
+  document.getElementById('bk-show')?.addEventListener('click', async () => {
+    const r = await api('POST', '/api/backups/reveal').catch(() => null);
+    if (!r) return;
+    const el = document.getElementById('bk-pw');
+    el.type = 'text';
+    el.value = r.password;
+    el.select();
+  });
+
+  document.getElementById('bak-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const out = document.getElementById('bk-out');
+    const val = (id) => document.getElementById(id).value;
+    const ep = document.getElementById('bk-endpoint');
+    try {
+      await api('PUT', '/api/backups', {
+        destination: val('bk-dest'),
+        endpoint: ep.value.trim(),
+        region: val('bk-region').trim(),
+        bucket: val('bk-bucket'),
+        prefix: val('bk-prefix'),
+        accessKey: val('bk-ak'),
+        secretKey: val('bk-sk'),
+        password: val('bk-pw'),
+        enabled: document.getElementById('bk-enabled').checked,
+        days: [...document.querySelectorAll('.bk-day:checked')].map((x) => Number(x.value)),
+        time: val('bk-time'),
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        keepDaily: Number(val('bk-kd')),
+        keepWeekly: Number(val('bk-kw')),
+        keepMonthly: Number(val('bk-km')),
+        beforeUpdate: document.getElementById('bk-before').checked,
+        verifyWeekly: document.getElementById('bk-vw').checked,
+      });
+      out.innerHTML = `<p class="hint">${t('bak.testing')}</p>`;
+      const r = await api('POST', '/api/backups/test');
+      toast(t(r.created ? 'bak.repoCreated' : 'bak.repoOk'));
+      settingsBackups(body);
+    } catch (err) {
+      out.innerHTML = errorBox(err);
+    }
+  });
+
+  const startJob = async (url) => {
+    document.getElementById('bak-run').disabled = true;
+    document.getElementById('bak-verify').disabled = true;
+    if (url) { try { await api('POST', url); } catch (err) { toast(err.message); } }
+    watchBackupJob(document.getElementById('bak-log'), (s2) => {
+      toast(t(s2.history?.[0]?.ok ? 'toast.done' : 'toast.failed'));
+      setTimeout(() => { if (route().tab === 'backups') settingsBackups(body); }, 1500);
+    });
+  };
+  document.getElementById('bak-run')?.addEventListener('click', () => startJob('/api/backups/run'));
+  document.getElementById('bak-verify')?.addEventListener('click', () => startJob('/api/backups/verify'));
+  if (st.running || st.queued) startJob(null); // a job is already running: just follow it
+
+  const snapsBox = document.getElementById('bk-snaps');
+  if (snapsBox) {
+    const list = await api('GET', '/api/backups/snapshots?fresh=1').catch((err) => { snapsBox.innerHTML = errorBox(err); return null; });
+    if (list && route().tab === 'backups') snapshotsTable(snapsBox, list.filter((x) => x.stack), { showStack: true });
+  }
 }
 
 function settingsAccount(body) {
