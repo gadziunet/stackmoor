@@ -6,7 +6,7 @@ The project website: plain HTML and CSS, no build step. Open `index.html` throug
 cd website && python3 -m http.server 8000
 ```
 
-Pushing changes to `main` publishes the folder to Bunny Storage (`.github/workflows/website.yml`).
+Pushing changes to `main` publishes the folder to GitHub Pages (`.github/workflows/website.yml`).
 
 - Fonts: IBM Plex Sans and IBM Plex Mono, self-hosted (SIL Open Font License, `assets/fonts/OFL.txt`) – no requests to Google.
 - `og.png` is the preview image for links shared on social media.
