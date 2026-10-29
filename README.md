@@ -59,7 +59,7 @@ Give every stack an address like `cloud.home.example.com` with a real HTTPS cert
 
 Stackmoor runs Caddy in its own container (`stackmoor-caddy`) with one wildcard certificate for all apps. The DNS provider can be changed any time in Settings. On Unraid, ports 80/443 are used by its web UI – choose other ports under *Advanced*.
 
-**The panel's own address.** Set *Address of this panel* (e.g. `stackmoor`) and the panel is also available at `https://stackmoor.home.example.com`. Once you open it there, you can turn on *Allow opening the panel only through this address* – opening it by IP then redirects to the domain, like in Cloudron. If the domain ever stops working, unlock it with:
+**The panel's own address.** Set *Address of this panel* (e.g. `stackmoor`) and the panel is also available at `https://stackmoor.home.example.com`. Once you open it there, you can turn on *Allow opening the panel only through this address* – access by IP address is then blocked and the panel only opens at its domain. If the domain ever stops working, unlock it with:
 
 ```bash
 docker exec stackmoor node src/cli.js unlock

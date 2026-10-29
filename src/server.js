@@ -50,7 +50,7 @@ app.set('trust proxy', 'loopback, linklocal, uniquelocal');
 app.use(express.json({ limit: '1mb' }));
 app.use(i18nMiddleware);
 
-// ---------- panel only through its domain (like Cloudron) ----------
+// ---------- panel only through its domain ----------
 domains.attachSelf().catch(() => {}).then(() => domains.refreshCaddyIp()).catch(() => {});
 const panelLock = createPanelLock({ getSettings: () => getSettings(db), domains });
 setInterval(() => { if (panelLock.lockedHost()) domains.refreshCaddyIp().catch(() => {}); }, 60_000).unref();

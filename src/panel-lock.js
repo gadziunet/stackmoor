@@ -1,4 +1,4 @@
-// "Panel only through its domain" (like Cloudron): with the lock on, only Caddy may reach
+// "Panel only through its domain": with the lock on, only Caddy may reach
 // the panel, and opening it by IP redirects to https://<panel>.<domain>.
 // Emergency switch: STACKMOOR_ALLOW_IP=1, or `docker exec stackmoor node src/cli.js unlock`.
 

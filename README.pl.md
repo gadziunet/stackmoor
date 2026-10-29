@@ -68,7 +68,7 @@ Każdy stack może dostać adres typu `chmura.dom.example.com` z prawdziwym cert
 
 Stackmoor uruchamia Caddy we własnym kontenerze (`stackmoor-caddy`) z jednym certyfikatem wildcard dla wszystkich aplikacji. Dostawcę DNS można zmienić w każdej chwili w Ustawieniach. Na Unraid porty 80/443 zajmuje jego panel – wybierz inne w sekcji *Zaawansowane*.
 
-**Adres samego panelu.** Wpisz *Adres tego panelu* (np. `stackmoor`), a panel będzie dostępny także pod `https://stackmoor.dom.example.com`. Gdy otworzysz go pod tym adresem, możesz włączyć *Panel tylko pod tym adresem* – wejście przez IP przekieruje wtedy na domenę, jak w Cloudronie. Gdyby domena kiedyś przestała działać, odblokujesz panel poleceniem:
+**Adres samego panelu.** Wpisz *Adres tego panelu* (np. `stackmoor`), a panel będzie dostępny także pod `https://stackmoor.dom.example.com`. Gdy otworzysz go pod tym adresem, możesz włączyć *Panel tylko pod tym adresem* – wejście przez adres IP zostanie wtedy zablokowane, a panel otworzy się tylko pod swoją domeną. Gdyby domena kiedyś przestała działać, odblokujesz panel poleceniem:
 
 ```bash
 docker exec stackmoor node src/cli.js unlock
