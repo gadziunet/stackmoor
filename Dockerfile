@@ -1,12 +1,12 @@
 # ---- dependencies (better-sqlite3 is a native module) ----
-FROM node:22-alpine AS deps
+FROM node:25-alpine AS deps
 WORKDIR /app
 RUN apk add --no-cache python3 make g++
 COPY package.json package-lock.json* ./
 RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi
 
 # ---- final image ----
-FROM node:22-alpine
+FROM node:25-alpine
 WORKDIR /app
 
 LABEL org.opencontainers.image.title="moorline" \
