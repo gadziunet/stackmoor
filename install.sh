@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Moorline installer / updater.
 #
-#   curl -fsSL https://raw.githubusercontent.com/OWNER/moorline/main/install.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/gadziunet/moorline/main/install.sh | sudo bash
 #
 # Installs Docker (if missing), then runs Moorline as a container.
 # Running it again updates Moorline to the latest image. Your stacks and settings are kept.
@@ -10,11 +10,11 @@
 #   PORT             panel port                         (default: 5001)
 #   STACKS_DIR       where stacks are stored            (default: /opt/stacks)
 #   INSTALL_DIR      where the panel's files live       (default: /opt/moorline)
-#   MOORLINE_IMAGE image to run                       (default: ghcr.io/OWNER/moorline:latest)
+#   MOORLINE_IMAGE image to run                       (default: ghcr.io/gadziunet/moorline:latest)
 
 set -euo pipefail
 
-GITHUB_REPO="OWNER/moorline"
+GITHUB_REPO="gadziunet/moorline"
 DEFAULT_IMAGE="ghcr.io/${GITHUB_REPO}:latest"
 
 INSTALL_DIR="${INSTALL_DIR:-/opt/moorline}"

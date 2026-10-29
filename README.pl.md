@@ -13,7 +13,7 @@ Prosty webowy panel do stacków Docker Compose – w duchu Dockge, ale bez myśl
 Na czystym Debianie, Ubuntu albo Raspberry Pi OS (x86_64 lub arm64):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OWNER/moorline/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/gadziunet/moorline/main/install.sh | sudo bash
 ```
 
 Skrypt instaluje Dockera, jeśli go brakuje, uruchamia Moorline i wypisuje adres, np. `http://192.168.1.50:5001`. Przy pierwszym wejściu tworzysz konto administratora.

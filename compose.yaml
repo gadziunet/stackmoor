@@ -6,7 +6,7 @@ services:
   moorline:
     build: .
     # Or use a published image instead of building:
-    # image: ghcr.io/OWNER/moorline:latest
+    # image: ghcr.io/gadziunet/moorline:latest
     container_name: moorline
     restart: unless-stopped
     ports:

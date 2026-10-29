@@ -13,7 +13,7 @@ A simple web UI for Docker Compose stacks – in the spirit of Dockge, but you n
 On a clean Debian, Ubuntu or Raspberry Pi OS machine (x86_64 or arm64):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OWNER/moorline/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/gadziunet/moorline/main/install.sh | sudo bash
 ```
 
 The script installs Docker if it's missing, starts Moorline and prints its address, e.g. `http://192.168.1.50:5001`. On first visit you create the administrator account.
