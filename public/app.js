@@ -188,7 +188,7 @@ function renderShell() {
     app.innerHTML = `
       <div class="layout">
         <aside class="sidebar">
-          <div class="brand">${LOGO}<span>Moorline</span><span class="version">${esc(state.version)}</span></div>
+          <a class="brand" href="#/" title="${esc(t('home.title'))}">${LOGO}<span>Moorline</span></a><span class="version">${esc(state.version)}</span>
           <a class="btn primary new" href="#/new">${t('nav.newStack')}</a>
           <ul class="stack-list" id="stack-list"></ul>
           <div class="sidebar-foot">
