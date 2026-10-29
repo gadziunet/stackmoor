@@ -1,93 +1,89 @@
 # StackPanel
 
-Prosty webowy panel do zarządzania stackami Docker Compose – w duchu Dockge, ale z automatycznymi wolumenami, a w kolejnych etapach z backupem do S3/B2 na wzór Cloudrona, lokalnymi domenami przez Caddy i instalatorem.
+A simple web UI for Docker Compose stacks – in the spirit of Dockge, but you never have to think about volume paths. Every stack keeps its data in its own folder, ready for backups.
 
-> Nazwa robocza. Żeby zmienić: `package.json`, `<title>` i `.brand` w `public/`, nazwa kontenera w `compose.yaml`.
+[Polski](README.pl.md)
 
-## Co działa (etap 1 – stacki)
+> **Status:** early development (v0.1). Works for managing stacks; backups, local domains and the setup wizard are on the roadmap.
 
-- lista stacków ze statusem (działa / częściowo / zatrzymany),
-- tworzenie stacka przez wklejenie `compose.yaml` (+ opcjonalny `.env`),
-- edytor z walidacją przez `docker compose config` – błędny plik nie zostanie zapisany,
-- Uruchom, Restart, Aktualizuj (pull + up), Zatrzymaj, Wyłącz – z wyjściem na żywo,
-- logi na żywo, lista kontenerów z portami, historia operacji,
-- usuwanie stacka do kosza (`.trash/`) – dane nie są kasowane na stałe,
-- jedno konto admina, sesje i ustawienia w SQLite.
+## Install
 
-## Automatyczne wolumeny
-
-Nie wpisujesz ścieżek na hoście. Każdy stack ma folder `/opt/stacks/<nazwa>/`, a dane aplikacji lądują w `/opt/stacks/<nazwa>/data/`:
-
-| W compose | Po zapisie |
-|---|---|
-| `- /config` | `- ./data/app-config:/config` |
-| `- /portainer/.../app:/config` | `- ./data/app-config:/config` |
-| `- db_data:/var/lib/mysql` | `- ./data/db_data:/var/lib/mysql` |
-| nic, ale obraz ma `VOLUME /data` | przy uruchomieniu dopisywane `- ./data/app-data:/data` |
-
-Bez zmian zostają: ścieżki systemowe (`docker.sock`, `/dev`, `/etc/localtime`…), ścieżki z listy dozwolonych w Ustawieniach (domyślnie `/mnt`, `/media` – np. dyski z filmami, bez backupu), ścieżki z `${ZMIENNYMI}`, ścieżki względne wewnątrz stacka i wolumeny `external`.
-
-Panel pokazuje po zapisie, co zmienił. Foldery tworzy przed startem z właścicielem `PUID:PGID` (domyślnie 1000:1000), żeby nie powstały jako root. Jeśli aplikacja montuje pojedynczy **plik** (np. `nginx.conf`), panel nie pozwoli wystartować bez niego, bo Docker utworzyłby w tym miejscu pusty folder.
-
-Automatyczne wolumeny można wyłączyć dla wybranego stacka (checkbox pod edytorem).
-
-## Instalacja na serwerze testowym
+On a clean Debian, Ubuntu or Raspberry Pi OS machine (x86_64 or arm64):
 
 ```bash
-git clone https://<twoj-forgejo>/gadziunet/stackpanel.git
-cd stackpanel
-docker compose up -d --build
+curl -fsSL https://raw.githubusercontent.com/OWNER/stackpanel/main/install.sh | sudo bash
 ```
 
-Panel: `http://<ip-serwera>:5001` – przy pierwszym wejściu tworzysz konto admina.
+The script installs Docker if it's missing, starts StackPanel and prints its address, e.g. `http://192.168.1.50:5001`. On first visit you create the administrator account.
 
-**Ważne:** folder stacków musi być zamontowany pod tą samą ścieżką w kontenerze i na hoście (`/opt/stacks:/opt/stacks`), bo panel przekazuje ścieżki do Dockera działającego na hoście.
+Run the same command again to update. Optional settings: `curl ... | sudo PORT=8080 STACKS_DIR=/srv/stacks bash`.
 
-Panel ma dostęp do `docker.sock`, czyli pełną kontrolę nad serwerem – trzymaj go tylko w sieci lokalnej / za VPN.
+> StackPanel has access to the Docker socket, which means full control over the machine. Keep it on your local network or behind a VPN.
 
-### Uruchomienie bez Dockera (do developmentu)
+## Features
+
+- list of stacks with live status
+- create a stack by pasting a `compose.yaml` (+ optional `.env`)
+- editor with validation through `docker compose config` – a broken file is never saved
+- Start, Restart, Update (pull + up), Stop, Shut down – with live output
+- live logs, containers with ports, operation history
+- deleting a stack moves its folder to `.trash/` – nothing is lost by accident
+- English and Polish interface
+
+## Automatic volumes
+
+You don't type host paths. Each stack lives in `/opt/stacks/<name>/` and its data in `/opt/stacks/<name>/data/`:
+
+| In your compose | After saving |
+|---|---|
+| `- /config` | `- ./data/app-config:/config` |
+| `- /some/host/path:/config` | `- ./data/app-config:/config` |
+| `- db_data:/var/lib/mysql` | `- ./data/db_data:/var/lib/mysql` |
+| nothing, but the image has `VOLUME /data` | `- ./data/app-data:/data` added on start |
+
+Left untouched: system paths (`docker.sock`, `/dev`, `/etc/localtime`…), host paths on the allow-list in Settings (default `/mnt`, `/media` – e.g. media drives, not backed up), paths with `${VARIABLES}`, relative paths inside the stack and `external` volumes.
+
+After saving, the panel shows exactly what it changed. Folders are created before start with owner `PUID:PGID` (default 1000:1000) so they don't end up owned by root. If an app mounts a single **file** (e.g. `nginx.conf`), the panel won't start the stack without it, because Docker would create an empty folder in its place.
+
+Automatic volumes can be turned off per stack.
+
+## Roadmap
+
+- [x] Stacks, editor, automatic volumes, logs
+- [ ] Local domains through Caddy (API, wildcard certificates via DNS-01 or `tls internal`)
+- [ ] Cloudron-style backups – per stack, automatically before updates, database dumps, schedule, retention, encryption; restic to S3 / Backblaze B2; restore and clone
+- [ ] Setup wizard: fresh install or restore everything from a backup
+
+## Development
 
 ```bash
 npm install
-STACKS_DIR=/opt/stacks npm run dev
+STACKS_DIR=$HOME/stacks npm run dev   # http://localhost:5001
+npm test
 ```
 
-Wymaga Node 20+ oraz `docker` z wtyczką `compose` na tej samej maszynie.
+Requires Node 20+ and `docker` with the `compose` plugin. Or with Docker: `docker compose up -d --build` (set `STACKS_DIR` in `.env`).
 
-### Zmienne środowiskowe
-
-| Zmienna | Domyślnie | Opis |
+| Variable | Default | Description |
 |---|---|---|
-| `PORT` | `5001` | port panelu |
-| `STACKS_DIR` | `/opt/stacks` | folder ze stackami |
-| `DATA_DIR` | `./data` (w obrazie `/app/data`) | baza SQLite panelu |
-
-## Przeniesienie aplikacji z Dockhand
-
-1. Utwórz folder `/opt/stacks/<nazwa>/data/` i skopiuj dane, np. `/portainer/Files/AppData/Config/<app>` → `/opt/stacks/<nazwa>/data/<serwis>-config` (dokładną nazwę folderu panel pokaże po zapisie compose).
-2. Zatrzymaj stack w Dockhand.
-3. W panelu utwórz stack z tym samym compose – ścieżki zostaną przepięte na `./data/...`.
-4. Uruchom i sprawdź.
-
-Panel pozwala utworzyć stack w istniejącym folderze bez `compose.yaml`, więc możesz najpierw wgrać dane, a potem dodać stack.
-
-## Struktura
+| `PORT` | `5001` | panel port |
+| `STACKS_DIR` | `/opt/stacks` | stacks folder (must be mounted at the same path in the container) |
+| `DATA_DIR` | `./data` (`/app/data` in the image) | panel database (SQLite) |
 
 ```
 src/
-  server.js    – Express, API, sesje
-  db.js        – SQLite (better-sqlite3, WAL), migracje, ustawienia
-  auth.js      – hasła (scrypt), sesje, limit logowań
-  stacks.js    – operacje na stackach, uruchamianie docker compose
-  compose.js   – automatyczne wolumeny (przepisywanie YAML z zachowaniem komentarzy)
-  docker.js    – wywołania CLI docker bez powłoki
-public/        – interfejs (czysty JS, bez budowania)
-test/          – testy logiki wolumenów (npm test)
+  server.js    – Express, API, sessions
+  db.js        – SQLite (better-sqlite3, WAL), migrations, settings
+  auth.js      – passwords (scrypt), sessions, login rate limit
+  stacks.js    – stack operations, running docker compose
+  compose.js   – automatic volumes (YAML rewrite that keeps comments)
+  i18n.js      – server messages (en, pl)
+public/        – UI (plain JS, no build step), i18n.js for UI texts
+install.sh     – installer / updater
 ```
 
-## Plan
+Translations: add a language block to `src/i18n.js` and `public/i18n.js` – tests check that every language has all keys.
 
-- [x] **Etap 1:** stacki, edytor, automatyczne wolumeny, logi
-- [ ] **Etap 2:** domeny lokalne przez Caddy (API, wildcard DNS-01 Bunny / `tls internal`)
-- [ ] **Etap 3:** backupy jak w Cloudronie – per stack, przed aktualizacją, dumpy baz po labelce, harmonogram, retencja, szyfrowanie, restic → S3/B2, restore i klon
-- [ ] **Etap 4:** instalator jednym poleceniem + kreator „nowa instalacja / przywróć z backupu”
+## License
+
+[AGPL-3.0](LICENSE) © Gadziunet. You may use, modify and share StackPanel freely; if you distribute a modified version or offer it as a network service, you must publish your changes under the same license.

@@ -3,3 +3,5 @@ data
 test
 .git
 *.md
+.github
+install.sh

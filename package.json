@@ -1,7 +1,7 @@
 {
   "name": "stackpanel",
   "version": "0.1.0",
-  "description": "Prosty webowy panel do Docker Compose z automatycznymi wolumenami (etap 1: stacki).",
+  "description": "Simple web UI for Docker Compose stacks with automatic volumes.",
   "type": "module",
   "main": "src/server.js",
   "scripts": {
@@ -17,6 +17,7 @@
     "express": "^4.21.2",
     "yaml": "^2.7.0"
   },
-  "license": "UNLICENSED",
-  "private": true
+  "license": "AGPL-3.0-only",
+  "private": true,
+  "repository": "github:OWNER/stackpanel"
 }

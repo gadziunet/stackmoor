@@ -1,7 +1,8 @@
 // StackPanel – interfejs (bez frameworka, bez kroku budowania).
+import { t, lang, setLang, LANGS } from './i18n.js';
 
 const app = document.getElementById('app');
-const state = { user: null, needsSetup: false, stacks: [], refreshTimer: null, abort: null };
+const state = { user: null, needsSetup: false, stacks: [], refreshTimer: null, abort: null, version: '' };
 
 const NEW_STACK_TEMPLATE = `services:
   app:
@@ -13,7 +14,7 @@ const NEW_STACK_TEMPLATE = `services:
       - /usr/share/nginx/html
 `;
 
-const STATE_LABEL = { running: 'działa', partial: 'częściowo', exited: 'zatrzymany', down: 'nieuruchomiony' };
+const stateLabel = (s) => t(`state.${s}`);
 
 // ---------- pomocnicze ----------
 
@@ -23,14 +24,20 @@ function toast(msg) {
   const el = document.getElementById('toast');
   el.textContent = msg;
   el.classList.add('show');
-  clearTimeout(toast.t);
-  toast.t = setTimeout(() => el.classList.remove('show'), 2600);
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => el.classList.remove('show'), 2600);
 }
+
+const headers = (json) => ({
+  ...(json ? { 'Content-Type': 'application/json' } : {}),
+  'X-Requested-With': 'stackpanel',
+  'X-Lang': lang,
+});
 
 async function api(method, url, body) {
   const res = await fetch(url, {
     method,
-    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'stackpanel' },
+    headers: headers(true),
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
@@ -38,22 +45,22 @@ async function api(method, url, body) {
     state.user = null;
     render();
   }
-  if (!res.ok) throw new Error(data.error || `Błąd ${res.status}`);
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
 }
 
 // Czyta odpowiedź strumieniową i przekazuje tekst na bieżąco. Zwraca kod wyjścia (jeśli jest).
 async function stream(method, url, onText, signal) {
-  const res = await fetch(url, { method, headers: { 'X-Requested-With': 'stackpanel' }, signal });
+  const res = await fetch(url, { method, headers: headers(false), signal });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || `Błąd ${res.status}`);
+    throw new Error(data.error || `HTTP ${res.status}`);
   }
   const reader = res.body.getReader();
   const dec = new TextDecoder();
   let exit = null;
   let buf = '';
-  // Wysyłamy na ekran tylko pełne linie, żeby znacznik __EXIT__ nigdy nie został przecięty.
+  // Na ekran idą tylko pełne linie, żeby znacznik __EXIT__ nigdy nie został przecięty.
   const flush = (all) => {
     const cut = all ? buf.length : buf.lastIndexOf('\n') + 1;
     if (cut <= 0) return;
@@ -102,17 +109,33 @@ function enableTabKey(textarea, save) {
   });
 }
 
+const errorBox = (err) => `<div class="notice error">${esc(err.message)}</div>`;
+
 function notices(result) {
   let html = '';
   if (result.changes?.length) {
-    html += `<div class="notice info"><strong>Panel sam ustawił miejsce na dane:</strong>
+    html += `<div class="notice info"><strong>${t('notice.changes')}</strong>
       <ul>${result.changes.map((c) => `<li>${esc(c)}</li>`).join('')}</ul></div>`;
   }
   if (result.warnings?.length) {
-    html += `<div class="notice warn"><strong>Do sprawdzenia:</strong>
+    html += `<div class="notice warn"><strong>${t('notice.warnings')}</strong>
       <ul>${result.warnings.map((c) => `<li>${esc(c)}</li>`).join('')}</ul></div>`;
   }
   return html;
+}
+
+function langSelect(id) {
+  return `<select id="${id}" class="lang" aria-label="${esc(t('set.language'))}">
+    ${Object.entries(LANGS).map(([code, label]) => `<option value="${code}" ${code === lang ? 'selected' : ''}>${label}</option>`).join('')}
+  </select>`;
+}
+
+function bindLangSelect(id) {
+  document.getElementById(id)?.addEventListener('change', (e) => {
+    setLang(e.target.value);
+    document.querySelector('.layout')?.remove(); // przebuduj cały układ w nowym języku
+    render();
+  });
 }
 
 // ---------- logowanie ----------
@@ -121,16 +144,19 @@ function renderAuth() {
   const setup = state.needsSetup;
   app.innerHTML = `
     <div class="auth"><form class="card" id="auth">
-      <h1>${setup ? 'Witaj w StackPanel' : 'Zaloguj się'}</h1>
-      <p>${setup ? 'Utwórz konto administratora. Będzie jedynym kontem w panelu.' : 'Panel zarządzania stackami Docker Compose.'}</p>
-      <div class="field"><label for="u">Login</label>
-        <input type="text" id="u" autocomplete="username" required value="${setup ? 'admin' : ''}"></div>
-      <div class="field"><label for="p">Hasło</label>
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <h1>${t(setup ? 'auth.welcome' : 'auth.login')}</h1>${langSelect('auth-lang')}
+      </div>
+      <p>${t(setup ? 'auth.setupLead' : 'auth.loginLead')}</p>
+      <div class="field"><label for="u">${t('auth.username')}</label>
+        <input type="text" id="u" autocomplete="username" autocapitalize="off" required value="${setup ? 'admin' : ''}"></div>
+      <div class="field"><label for="p">${t('auth.password')}</label>
         <input type="password" id="p" autocomplete="${setup ? 'new-password' : 'current-password'}" required minlength="${setup ? 10 : 1}">
-        ${setup ? '<p class="hint">Minimum 10 znaków.</p>' : ''}</div>
+        ${setup ? `<p class="hint">${t('auth.minLength')}</p>` : ''}</div>
       <div id="err"></div>
-      <button class="btn primary" style="width:100%">${setup ? 'Utwórz konto' : 'Zaloguj'}</button>
+      <button class="btn primary" style="width:100%">${t(setup ? 'auth.create' : 'auth.submit')}</button>
     </form></div>`;
+  bindLangSelect('auth-lang');
   document.getElementById('auth').addEventListener('submit', async (e) => {
     e.preventDefault();
     const body = { username: document.getElementById('u').value, password: document.getElementById('p').value };
@@ -138,7 +164,7 @@ function renderAuth() {
       await api('POST', setup ? '/api/setup' : '/api/login', body);
       await boot();
     } catch (err) {
-      document.getElementById('err').innerHTML = `<div class="notice error">${esc(err.message)}</div>`;
+      document.getElementById('err').innerHTML = errorBox(err);
     }
   });
 }
@@ -161,12 +187,12 @@ function renderShell() {
     app.innerHTML = `
       <div class="layout">
         <aside class="sidebar">
-          <div class="brand">${LOGO}<span>StackPanel</span></div>
-          <a class="btn primary new" href="#/new">+ Nowy stack</a>
+          <div class="brand">${LOGO}<span>StackPanel</span><span class="version">${esc(state.version)}</span></div>
+          <a class="btn primary new" href="#/new">${t('nav.newStack')}</a>
           <ul class="stack-list" id="stack-list"></ul>
           <div class="sidebar-foot">
-            <a class="btn small" href="#/settings">Ustawienia</a>
-            <button class="btn small" id="logout">Wyloguj</button>
+            <a class="btn small" href="#/settings">${t('nav.settings')}</a>
+            <button class="btn small" id="logout">${t('nav.logout')}</button>
           </div>
         </aside>
         <main class="main" id="main"></main>
@@ -186,11 +212,11 @@ function renderStackList() {
   const current = route().name;
   list.innerHTML = state.stacks.length
     ? state.stacks.map((s) => `
-      <li><a href="#/stack/${esc(s.name)}" class="${s.name === current ? 'active' : ''}" title="${esc(STATE_LABEL[s.state])}">
+      <li><a href="#/stack/${esc(s.name)}" class="${s.name === current ? 'active' : ''}" title="${esc(stateLabel(s.state))}">
         <span class="dot ${s.state}"></span>${esc(s.name)}
         <span class="count">${s.total ? `${s.running}/${s.total}` : ''}</span>
       </a></li>`).join('')
-    : `<li class="empty-hint">Brak stacków.</li>`;
+    : `<li class="empty-hint">${t('nav.noStacks')}</li>`;
 }
 
 async function refreshStacks() {
@@ -206,35 +232,35 @@ async function refreshStacks() {
 function renderHome() {
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="head"><h1>Stacki</h1></div>
+    <div class="head"><h1>${t('home.title')}</h1></div>
     ${state.stacks.length ? `<div class="home-grid">${state.stacks.map((s) => `
       <a class="card" href="#/stack/${esc(s.name)}"><span class="dot ${s.state}"></span>
-        <div><strong>${esc(s.name)}</strong><br><span class="hint">${esc(STATE_LABEL[s.state])}${s.total ? ` · ${s.running}/${s.total}` : ''}</span></div>
+        <div><strong>${esc(s.name)}</strong><br><span class="hint">${esc(stateLabel(s.state))}${s.total ? ` · ${s.running}/${s.total}` : ''}</span></div>
       </a>`).join('')}</div>`
-    : `<div class="card"><h2>Nie masz jeszcze żadnego stacka</h2>
-        <p class="hint">Wklej docker compose z dokumentacji aplikacji – panel sam zadba o foldery na dane.</p>
-        <p><a class="btn primary" href="#/new">Utwórz pierwszy stack</a></p></div>`}`;
+    : `<div class="card"><h2>${t('home.emptyTitle')}</h2>
+        <p class="hint">${t('home.emptyLead')}</p>
+        <p><a class="btn primary" href="#/new">${t('home.emptyCta')}</a></p></div>`}`;
 }
 
 function renderNew() {
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="head"><h1>Nowy stack</h1></div>
+    <div class="head"><h1>${t('new.title')}</h1></div>
     <form id="new" class="card">
-      <div class="field"><label for="name">Nazwa</label>
-        <input type="text" id="name" placeholder="np. nextcloud" required pattern="[a-z0-9][a-z0-9_\\-]*" autocapitalize="off" autocomplete="off">
-        <p class="hint">Małe litery, cyfry, „-” i „_”. Będzie też nazwą folderu.</p></div>
+      <div class="field"><label for="name">${t('new.name')}</label>
+        <input type="text" id="name" placeholder="${esc(t('new.namePlaceholder'))}" required pattern="[a-z0-9][a-z0-9_\\-]*" autocapitalize="off" autocomplete="off">
+        <p class="hint">${t('new.nameHint')}</p></div>
       <div class="field"><label for="compose">compose.yaml</label>
         <textarea id="compose" class="code" spellcheck="false">${esc(NEW_STACK_TEMPLATE)}</textarea>
-        <p class="hint">Ścieżek na dane nie musisz wpisywać – wystarczy np. <code>- /config</code> albo nic, panel sam założy foldery w <code>./data/</code>.</p></div>
-      <div class="field"><label for="env">.env <span class="hint">(opcjonalnie)</span></label>
+        <p class="hint">${t('new.composeHint')}</p></div>
+      <div class="field"><label for="env">.env <span class="hint">${t('new.envOptional')}</span></label>
         <textarea id="env" class="code env" spellcheck="false" placeholder="TZ=Europe/Warsaw"></textarea></div>
       <label class="check field"><input type="checkbox" id="auto" checked>
-        <span>Automatyczne wolumeny <span class="hint">– przepinaj dane do folderu stacka (zalecane, potrzebne do backupu)</span></span></label>
+        <span>${t('auto.label')} <span class="hint">${t('auto.hintNew')}</span></span></label>
       <div id="out"></div>
       <div class="row">
-        <button class="btn" type="submit" data-start="0">Utwórz</button>
-        <button class="btn primary" type="submit" data-start="1">Utwórz i uruchom</button>
+        <button class="btn" type="submit" data-start="0">${t('new.create')}</button>
+        <button class="btn primary" type="submit" data-start="1">${t('new.createStart')}</button>
       </div>
     </form>`;
   enableTabKey(document.getElementById('compose'));
@@ -250,24 +276,23 @@ function renderNew() {
         env: document.getElementById('env').value,
         autoVolumes: document.getElementById('auto').checked,
       });
-      sessionStorage.setItem(`sp-notice-${name}`, JSON.stringify(res));
-      if (start) sessionStorage.setItem(`sp-autostart-${name}`, '1');
+      state.pendingNotice = { name, result: res, autostart: start };
       await refreshStacks();
       location.hash = `#/stack/${name}`;
     } catch (err) {
-      out.innerHTML = `<div class="notice error">${esc(err.message)}</div>`;
+      out.innerHTML = errorBox(err);
     }
   });
 }
 
 async function renderStack(name) {
   const main = document.getElementById('main');
-  main.innerHTML = `<p class="hint">Wczytuję…</p>`;
+  main.innerHTML = `<p class="hint">${t('stack.loading')}</p>`;
   let data;
   try {
     data = await api('GET', `/api/stacks/${name}`);
   } catch (err) {
-    main.innerHTML = `<div class="notice error">${esc(err.message)}</div>`;
+    main.innerHTML = errorBox(err);
     return;
   }
   const summary = state.stacks.find((s) => s.name === name) || { state: 'down' };
@@ -275,32 +300,28 @@ async function renderStack(name) {
   main.innerHTML = `
     <div class="head">
       <h1>${esc(name)}</h1>
-      <span class="badge ${summary.state}" id="badge">${esc(STATE_LABEL[summary.state])}</span>
+      <span class="badge ${summary.state}" id="badge">${esc(stateLabel(summary.state))}</span>
       <div class="actions">
-        <button class="btn primary" data-act="up">Uruchom</button>
-        <button class="btn" data-act="restart">Restart</button>
-        <button class="btn" data-act="update" title="Pobierz nowe obrazy i uruchom ponownie">Aktualizuj</button>
-        <button class="btn" data-act="stop">Zatrzymaj</button>
-        <button class="btn" data-act="down" title="Zatrzymaj i usuń kontenery (dane zostają)">Wyłącz</button>
+        <button class="btn primary" data-act="up">${t('act.up')}</button>
+        <button class="btn" data-act="restart">${t('act.restart')}</button>
+        <button class="btn" data-act="update" title="${esc(t('act.updateTitle'))}">${t('act.update')}</button>
+        <button class="btn" data-act="stop">${t('act.stop')}</button>
+        <button class="btn" data-act="down" title="${esc(t('act.downTitle'))}">${t('act.down')}</button>
       </div>
     </div>
     <div id="notice"></div>
-    <div id="op-wrap" hidden><h2 id="op-title">Operacja</h2><pre class="terminal" id="op"></pre><br></div>
+    <div id="op-wrap" hidden><h2 id="op-title">${t('act.operation')}</h2><pre class="terminal" id="op"></pre><br></div>
     <div class="tabs" role="tablist">
-      <button data-tab="compose" class="on">Compose</button>
-      <button data-tab="env">.env</button>
-      <button data-tab="containers">Kontenery</button>
-      <button data-tab="logs">Logi</button>
-      <button data-tab="history">Historia</button>
-      <button data-tab="danger">Usuń</button>
+      ${['compose', 'env', 'containers', 'logs', 'history', 'delete']
+        .map((k, i) => `<button data-tab="${k}" class="${i === 0 ? 'on' : ''}">${t(`tab.${k}`)}</button>`).join('')}
     </div>
     <div id="tab"></div>`;
 
-  const notice = document.getElementById('notice');
-  const saved = sessionStorage.getItem(`sp-notice-${name}`);
-  if (saved) {
-    notice.innerHTML = notices(JSON.parse(saved));
-    sessionStorage.removeItem(`sp-notice-${name}`);
+  let autostart = false;
+  if (state.pendingNotice?.name === name) {
+    document.getElementById('notice').innerHTML = notices(state.pendingNotice.result);
+    autostart = state.pendingNotice.autostart;
+    state.pendingNotice = null;
   }
 
   let currentTab = 'compose';
@@ -312,29 +333,28 @@ async function renderStack(name) {
         <div class="card">
           <textarea id="ed" class="code" spellcheck="false">${esc(data.compose)}</textarea>
           <label class="check" style="margin-top:12px"><input type="checkbox" id="auto" ${data.autoVolumes ? 'checked' : ''}>
-            <span>Automatyczne wolumeny <span class="hint">– przepinaj dane do folderu stacka</span></span></label>
+            <span>${t('auto.label')} <span class="hint">${t('auto.hint')}</span></span></label>
           <div id="save-out" style="margin-top:12px"></div>
           <div class="row" style="margin-top:12px">
-            <button class="btn" id="save">Zapisz</button>
-            <button class="btn primary" id="save-up">Zapisz i uruchom</button>
-            <span class="hint hide-mobile">Ctrl+S zapisuje</span>
+            <button class="btn" id="save">${t('edit.save')}</button>
+            <button class="btn primary" id="save-up">${t('edit.saveStart')}</button>
+            <span class="hint hide-mobile">${t('edit.ctrlS')}</span>
           </div>
         </div>`;
       const ed = document.getElementById('ed');
       const doSave = async (thenUp) => {
         const out = document.getElementById('save-out');
+        const auto = document.getElementById('auto').checked;
         try {
-          const res = await api('PUT', `/api/stacks/${name}`, {
-            compose: ed.value, env: data.env, autoVolumes: document.getElementById('auto').checked,
-          });
+          const res = await api('PUT', `/api/stacks/${name}`, { compose: ed.value, env: data.env, autoVolumes: auto });
           data.compose = res.compose;
-          data.autoVolumes = document.getElementById('auto').checked;
+          data.autoVolumes = auto;
           ed.value = res.compose;
           out.innerHTML = notices(res);
-          toast('Zapisano');
+          toast(t('edit.saved'));
           if (thenUp) runAction('up');
         } catch (err) {
-          out.innerHTML = `<div class="notice error">${esc(err.message)}</div>`;
+          out.innerHTML = errorBox(err);
         }
       };
       enableTabKey(ed, () => doSave(false));
@@ -345,10 +365,10 @@ async function renderStack(name) {
     env() {
       tab.innerHTML = `
         <div class="card">
-          <textarea id="ed" class="code env" style="min-height:260px" spellcheck="false" placeholder="KLUCZ=wartość">${esc(data.env)}</textarea>
-          <p class="hint">Zmienne są dostępne w compose jako <code>\${KLUCZ}</code>. Po zmianie użyj „Uruchom”, żeby kontenery je dostały.</p>
+          <textarea id="ed" class="code env" style="min-height:260px" spellcheck="false" placeholder="KEY=value">${esc(data.env)}</textarea>
+          <p class="hint">${t('env.hint')}</p>
           <div id="save-out"></div>
-          <button class="btn primary" id="save">Zapisz</button>
+          <button class="btn primary" id="save">${t('edit.save')}</button>
         </div>`;
       const ed = document.getElementById('ed');
       const doSave = async () => {
@@ -357,9 +377,9 @@ async function renderStack(name) {
           await api('PUT', `/api/stacks/${name}`, { compose: data.compose, env: ed.value, autoVolumes: data.autoVolumes });
           data.env = ed.value;
           out.innerHTML = '';
-          toast('Zapisano .env');
+          toast(t('env.saved'));
         } catch (err) {
-          out.innerHTML = `<div class="notice error">${esc(err.message)}</div>`;
+          out.innerHTML = errorBox(err);
         }
       };
       enableTabKey(ed, doSave);
@@ -367,26 +387,27 @@ async function renderStack(name) {
     },
 
     async containers() {
-      tab.innerHTML = `<p class="hint">Wczytuję…</p>`;
+      tab.innerHTML = `<p class="hint">${t('stack.loading')}</p>`;
       const fresh = await api('GET', `/api/stacks/${name}`).catch(() => data);
       data.containers = fresh.containers;
+      if (currentTab !== 'containers') return;
       tab.innerHTML = data.containers.length ? `
         <div class="card" style="padding:6px 8px; overflow-x:auto"><table>
-          <thead><tr><th>Usługa</th><th>Stan</th><th>Obraz</th><th>Porty</th></tr></thead>
+          <thead><tr><th>${t('ct.service')}</th><th>${t('ct.state')}</th><th>${t('ct.image')}</th><th>${t('ct.ports')}</th></tr></thead>
           <tbody>${data.containers.map((c) => `
             <tr><td><strong>${esc(c.service)}</strong><br><span class="hint">${esc(c.name)}</span></td>
               <td><span class="badge ${c.state === 'running' ? 'running' : 'exited'}">${esc(c.state)}</span><br><span class="hint">${esc(c.status)}</span></td>
               <td><code>${esc(c.image)}</code></td>
               <td>${c.ports.map((p) => `<code>${esc(p)}</code>`).join('<br>') || '<span class="hint">—</span>'}</td></tr>`).join('')}
           </tbody></table></div>`
-        : `<div class="card hint">Brak kontenerów – stack nie był jeszcze uruchomiony albo został wyłączony.</div>`;
+        : `<div class="card hint">${t('ct.empty')}</div>`;
     },
 
     logs() {
       tab.innerHTML = `
         <div class="row" style="margin-bottom:10px">
-          <label class="check" style="margin:0"><input type="checkbox" id="follow" checked> Na żywo</label>
-          <button class="btn small" id="reload">Odśwież</button>
+          <label class="check" style="margin:0"><input type="checkbox" id="follow" checked> ${t('logs.live')}</label>
+          <button class="btn small" id="reload">${t('logs.refresh')}</button>
         </div>
         <pre class="terminal tall" id="logs"></pre>`;
       const pre = document.getElementById('logs');
@@ -396,7 +417,7 @@ async function renderStack(name) {
         const ctl = new AbortController();
         state.abort = ctl;
         const follow = document.getElementById('follow').checked ? 1 : 0;
-        stream('GET', `/api/stacks/${name}/logs?tail=300&follow=${follow}`, (t) => appendTo(pre, t), ctl.signal)
+        stream('GET', `/api/stacks/${name}/logs?tail=300&follow=${follow}`, (txt) => appendTo(pre, txt), ctl.signal)
           .catch((err) => { if (err.name !== 'AbortError') appendTo(pre, `\n${err.message}\n`); });
       };
       document.getElementById('reload').addEventListener('click', load);
@@ -406,56 +427,55 @@ async function renderStack(name) {
 
     async history() {
       const ops = await api('GET', `/api/stacks/${name}/operations`).catch(() => []);
-      const LABEL = { up: 'Uruchom', restart: 'Restart', update: 'Aktualizuj', stop: 'Zatrzymaj', down: 'Wyłącz' };
+      if (currentTab !== 'history') return;
       const STATUS = { ok: 'running', error: 'exited', running: 'partial', interrupted: 'exited' };
       tab.innerHTML = ops.length ? `
         <div class="card" style="padding:6px 8px"><table>
-          <thead><tr><th>Akcja</th><th>Wynik</th><th>Start</th><th></th></tr></thead>
+          <thead><tr><th>${t('hist.action')}</th><th>${t('hist.result')}</th><th>${t('hist.started')}</th><th></th></tr></thead>
           <tbody>${ops.map((o) => `<tr>
-            <td>${esc(LABEL[o.action] || o.action)}</td>
+            <td>${esc(t(`act.${o.action}`))}</td>
             <td><span class="badge ${STATUS[o.status] || ''}">${esc(o.status)}</span></td>
             <td><span class="hint">${esc(o.started_at)} UTC</span></td>
-            <td><button class="btn small" data-op="${o.id}">Pokaż</button></td></tr>`).join('')}
+            <td><button class="btn small" data-op="${o.id}">${t('hist.show')}</button></td></tr>`).join('')}
           </tbody></table></div><pre class="terminal" id="op-out" hidden></pre>`
-        : `<div class="card hint">Brak operacji.</div>`;
+        : `<div class="card hint">${t('hist.empty')}</div>`;
       tab.querySelectorAll('[data-op]').forEach((b) => b.addEventListener('click', async () => {
         const op = await api('GET', `/api/operations/${b.dataset.op}`);
         const pre = document.getElementById('op-out');
         pre.hidden = false;
-        pre.textContent = op.output || '(brak wyjścia)';
+        pre.textContent = op.output || t('hist.noOutput');
         pre.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }));
     },
 
-    danger() {
+    delete() {
       tab.innerHTML = `
         <div class="card">
-          <h2>Usuń stack</h2>
-          <p class="hint">Kontenery zostaną zatrzymane i usunięte. Folder stacka razem z danymi trafi do kosza
-            (<code>.trash/</code> w katalogu stacków) – nic nie jest kasowane na stałe.</p>
-          <div class="field"><label for="confirm">Wpisz <strong>${esc(name)}</strong>, aby potwierdzić</label>
+          <h2>${t('del.title')}</h2>
+          <p class="hint">${t('del.lead')}</p>
+          <div class="field"><label for="confirm">${t('del.confirm', { name: esc(name) })}</label>
             <input type="text" id="confirm" autocomplete="off" autocapitalize="off"></div>
           <div id="del-out"></div>
-          <button class="btn danger" id="del">Usuń stack</button>
+          <button class="btn danger" id="del">${t('del.button')}</button>
         </div>`;
       document.getElementById('del').addEventListener('click', async () => {
         try {
           await api('DELETE', `/api/stacks/${name}`, { confirm: document.getElementById('confirm').value });
-          toast('Stack usunięty');
+          toast(t('del.done'));
           await refreshStacks();
           location.hash = '#/';
         } catch (err) {
-          document.getElementById('del-out').innerHTML = `<div class="notice error">${esc(err.message)}</div>`;
+          document.getElementById('del-out').innerHTML = errorBox(err);
         }
       });
     },
   };
 
-  const showTab = (t) => {
-    if (currentTab === 'logs' && t !== 'logs') stopStream();
-    currentTab = t;
-    main.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === t));
-    tabs[t]();
+  const showTab = (k) => {
+    if (currentTab === 'logs' && k !== 'logs') stopStream();
+    currentTab = k;
+    main.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === k));
+    tabs[k]();
   };
   main.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
 
@@ -464,14 +484,15 @@ async function renderStack(name) {
     buttons.forEach((b) => (b.disabled = true));
     const wrap = document.getElementById('op-wrap');
     const pre = document.getElementById('op');
-    const title = main.querySelector(`[data-act="${act}"]`)?.textContent || act;
-    document.getElementById('op-title').textContent = `${title}…`;
+    const title = document.getElementById('op-title');
+    const label = t(`act.${act}`);
+    title.textContent = `${label}…`;
     wrap.hidden = false;
     pre.textContent = '';
     try {
-      const code = await stream('POST', `/api/stacks/${name}/actions/${act}`, (t) => appendTo(pre, t));
-      document.getElementById('op-title').textContent = code === 0 ? `${title} – gotowe` : `${title} – błąd`;
-      toast(code === 0 ? 'Gotowe' : 'Operacja zakończona błędem');
+      const code = await stream('POST', `/api/stacks/${name}/actions/${act}`, (txt) => appendTo(pre, txt));
+      title.textContent = t(code === 0 ? 'act.done' : 'act.failed', { action: label });
+      toast(t(code === 0 ? 'toast.done' : 'toast.failed'));
     } catch (err) {
       appendTo(pre, `\n${err.message}\n`);
     } finally {
@@ -481,7 +502,7 @@ async function renderStack(name) {
       const badge = document.getElementById('badge');
       if (s && badge) {
         badge.className = `badge ${s.state}`;
-        badge.textContent = STATE_LABEL[s.state];
+        badge.textContent = stateLabel(s.state);
       }
       // compose.yaml mógł zostać uzupełniony o wolumeny z obrazu
       const fresh = await api('GET', `/api/stacks/${name}`).catch(() => null);
@@ -493,42 +514,44 @@ async function renderStack(name) {
     }
   }
   main.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => {
-    if (b.dataset.act === 'down' && !confirm('Wyłączyć stack i usunąć kontenery? Dane zostają.')) return;
+    if (b.dataset.act === 'down' && !confirm(t('act.downConfirm'))) return;
     runAction(b.dataset.act);
   }));
 
   tabs.compose();
-  if (sessionStorage.getItem(`sp-autostart-${name}`)) {
-    sessionStorage.removeItem(`sp-autostart-${name}`);
-    runAction('up');
-  }
+  if (autostart) runAction('up');
 }
 
 async function renderSettings() {
   const main = document.getElementById('main');
   const s = await api('GET', '/api/settings');
   main.innerHTML = `
-    <div class="head"><h1>Ustawienia</h1></div>
+    <div class="head"><h1>${t('set.title')}</h1></div>
+    <div class="card">
+      <h2>${t('set.language')}</h2>
+      ${langSelect('set-lang')}
+    </div>
     <form class="card" id="settings">
-      <h2>Foldery na dane</h2>
-      <p class="hint" style="margin-top:-4px">Stacki leżą w <code>${esc(s.stacksDir)}</code>, dane każdej aplikacji w <code>&lt;stack&gt;/data/</code>.</p>
+      <h2>${t('set.folders')}</h2>
+      <p class="hint" style="margin-top:-4px">${t('set.foldersLead', { dir: esc(s.stacksDir) })}</p>
       <div class="row field">
-        <div style="flex:1;min-width:120px"><label for="puid">Właściciel (PUID)</label><input type="number" id="puid" value="${esc(s.puid)}"></div>
-        <div style="flex:1;min-width:120px"><label for="pgid">Grupa (PGID)</label><input type="number" id="pgid" value="${esc(s.pgid)}"></div>
+        <div style="flex:1;min-width:120px"><label for="puid">${t('set.puid')}</label><input type="number" id="puid" value="${esc(s.puid)}"></div>
+        <div style="flex:1;min-width:120px"><label for="pgid">${t('set.pgid')}</label><input type="number" id="pgid" value="${esc(s.pgid)}"></div>
       </div>
-      <div class="field"><label for="allow">Ścieżki hosta zostawiane bez zmian (jedna w linii)</label>
+      <div class="field"><label for="allow">${t('set.allow')}</label>
         <textarea id="allow" class="code env" spellcheck="false">${esc(s.hostPathAllowlist.join('\n'))}</textarea>
-        <p class="hint">Np. dyski z filmami. Montowania spod tych ścieżek nie są przepinane i nie będą w backupie.</p></div>
+        <p class="hint">${t('set.allowHint')}</p></div>
       <div id="s-out"></div>
-      <button class="btn primary">Zapisz</button>
+      <button class="btn primary">${t('set.save')}</button>
     </form>
     <form class="card" id="pw">
-      <h2>Zmiana hasła</h2>
-      <div class="field"><label for="cur">Obecne hasło</label><input type="password" id="cur" autocomplete="current-password" required></div>
-      <div class="field"><label for="nw">Nowe hasło</label><input type="password" id="nw" autocomplete="new-password" minlength="10" required></div>
+      <h2>${t('pw.title')}</h2>
+      <div class="field"><label for="cur">${t('pw.current')}</label><input type="password" id="cur" autocomplete="current-password" required></div>
+      <div class="field"><label for="nw">${t('pw.new')}</label><input type="password" id="nw" autocomplete="new-password" minlength="10" required></div>
       <div id="pw-out"></div>
-      <button class="btn">Zmień hasło</button>
+      <button class="btn">${t('pw.submit')}</button>
     </form>`;
+  bindLangSelect('set-lang');
   document.getElementById('settings').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
@@ -538,9 +561,9 @@ async function renderSettings() {
         hostPathAllowlist: document.getElementById('allow').value.split('\n'),
       });
       document.getElementById('s-out').innerHTML = '';
-      toast('Zapisano ustawienia');
+      toast(t('set.saved'));
     } catch (err) {
-      document.getElementById('s-out').innerHTML = `<div class="notice error">${esc(err.message)}</div>`;
+      document.getElementById('s-out').innerHTML = errorBox(err);
     }
   });
   document.getElementById('pw').addEventListener('submit', async (e) => {
@@ -549,9 +572,9 @@ async function renderSettings() {
       await api('POST', '/api/password', { current: document.getElementById('cur').value, next: document.getElementById('nw').value });
       e.target.reset();
       document.getElementById('pw-out').innerHTML = '';
-      toast('Hasło zmienione');
+      toast(t('pw.done'));
     } catch (err) {
-      document.getElementById('pw-out').innerHTML = `<div class="notice error">${esc(err.message)}</div>`;
+      document.getElementById('pw-out').innerHTML = errorBox(err);
     }
   });
 }
@@ -577,6 +600,7 @@ async function boot() {
   const s = await api('GET', '/api/state');
   state.user = s.user;
   state.needsSetup = s.needsSetup;
+  state.version = s.version ? `v${s.version}` : '';
   if (state.user) {
     state.stacks = await api('GET', '/api/stacks').catch(() => []);
     clearInterval(state.refreshTimer);

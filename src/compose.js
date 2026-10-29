@@ -11,6 +11,7 @@
 
 import path from 'node:path';
 import { parseDocument, isMap, isSeq, isScalar } from 'yaml';
+import { UserError } from './errors.js';
 
 export const SYSTEM_PATHS = [
   '/var/run/docker.sock',
@@ -82,11 +83,11 @@ export function parseCompose(text) {
   const doc = parseDocument(String(text ?? ''), { keepSourceTokens: false });
   if (doc.errors.length) {
     const e = doc.errors[0];
-    throw new Error(`Błąd składni YAML: ${e.message}`);
+    throw new UserError('compose.yamlError', { message: e.message });
   }
   const services = doc.get('services');
   if (!isMap(services) || services.items.length === 0) {
-    throw new Error('Plik compose musi mieć sekcję "services" z co najmniej jedną usługą.');
+    throw new UserError('compose.noServices');
   }
   return doc;
 }
@@ -100,7 +101,7 @@ function serviceEntries(doc) {
 
 /**
  * Przepina wolumeny do folderu stacka.
- * Zwraca { text, changes[], warnings[], changed }.
+ * Zwraca { text, changes[], warnings[], changed }; changes/warnings to obiekty { key, vars } do tłumaczenia.
  */
 export function normalizeCompose(text, { hostPathAllowlist = [] } = {}) {
   const doc = parseCompose(text);
@@ -131,13 +132,13 @@ export function normalizeCompose(text, { hostPathAllowlist = [] } = {}) {
       case 'relative':
         return null;
       case 'variable':
-        warnings.push(`${svc}: "${label}" zawiera zmienną – zostawiam bez zmian, sprawdź czy dane trafią do folderu stacka.`);
+        warnings.push({ key: 'warn.variable', vars: { svc, label } });
         return null;
       case 'named': {
         const info = namedInfo(source);
         if (info.special) {
           keptNamed.add(source);
-          warnings.push(`${svc}: wolumen "${source}" jest zewnętrzny lub ma własny driver – zostaje bez zmian i nie będzie w backupie folderu.`);
+          warnings.push({ key: 'warn.external', vars: { svc, name: source } });
           return null;
         }
         convertedNamed.add(source);
@@ -147,11 +148,11 @@ export function normalizeCompose(text, { hostPathAllowlist = [] } = {}) {
       case 'outside': {
         if (kind === 'host' && SYSTEM_PATHS.some((p) => isUnder(source, p))) return null;
         if (kind === 'host' && hostPathAllowlist.some((p) => isUnder(source, p))) {
-          warnings.push(`${svc}: "${source}" jest na liście dozwolonych ścieżek hosta – zostaje, ale nie będzie w backupie.`);
+          warnings.push({ key: 'warn.allowlisted', vars: { svc, source } });
           return null;
         }
         const next = dataPathFor(svc, target);
-        warnings.push(`${svc}: dane z "${source}" nie są kopiowane automatycznie – jeśli coś tam było, przenieś je do ${next}.`);
+        warnings.push({ key: 'warn.moveData', vars: { svc, source, dest: next } });
         return next;
       }
       default:
@@ -172,7 +173,7 @@ export function normalizeCompose(text, { hostPathAllowlist = [] } = {}) {
         if (next) {
           const before = item.value;
           item.value = formatShort(next, target, mode);
-          changes.push(`${svc}: ${before}  →  ${item.value}`);
+          changes.push({ key: 'change.rewrite', vars: { svc, from: before, to: item.value } });
         }
         continue;
       }
@@ -188,7 +189,7 @@ export function normalizeCompose(text, { hostPathAllowlist = [] } = {}) {
           item.set('type', 'bind');
           item.set('source', next);
           item.delete('volume'); // opcje typu "volume: nocopy" nie pasują do bind
-          changes.push(`${svc}: ${before}  →  ${next}:${target}`);
+          changes.push({ key: 'change.rewrite', vars: { svc, from: before, to: `${next}:${target}` } });
         }
       }
     }
@@ -224,7 +225,7 @@ export function addImageVolumes(text, missing) {
     for (const target of paths) {
       const entry = `${dataPathFor(svc, target)}:${target}`;
       vols.add(doc.createNode(entry));
-      changes.push(`${svc}: obraz przechowuje dane w ${target}  →  ${entry}`);
+      changes.push({ key: 'change.image', vars: { svc, target, entry } });
     }
   }
   return { text: changes.length ? doc.toString({ lineWidth: 0 }) : String(text), changes };

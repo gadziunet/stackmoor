@@ -103,8 +103,8 @@ test('komentarze w pliku zostają', () => {
 });
 
 test('błędny YAML i brak services dają czytelny błąd', () => {
-  assert.throws(() => normalizeCompose('services: [\n'), /składni YAML/);
-  assert.throws(() => normalizeCompose('version: "3"\n'), /services/);
+  assert.throws(() => normalizeCompose('services: [\n'), (e) => e.key === 'compose.yamlError');
+  assert.throws(() => normalizeCompose('version: "3"\n'), (e) => e.key === 'compose.noServices');
 });
 
 test('VOLUME z obrazu jest dopisywany, także gdy brak sekcji volumes', () => {

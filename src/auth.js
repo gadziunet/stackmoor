@@ -21,9 +21,10 @@ export function verifyPassword(password, stored) {
   return crypto.timingSafeEqual(expected, actual);
 }
 
+// Zwraca klucz tłumaczenia błędu albo null.
 export function validatePassword(password) {
   if (typeof password !== 'string' || password.length < 10) {
-    return 'Hasło musi mieć co najmniej 10 znaków.';
+    return 'auth.passwordTooShort';
   }
   return null;
 }
@@ -80,7 +81,7 @@ export function sessionMiddleware(db) {
 }
 
 export function requireAuth(req, res, next) {
-  if (!req.user) return res.status(401).json({ error: 'Zaloguj się ponownie.' });
+  if (!req.user) return res.status(401).json({ error: req.t('auth.loginRequired') });
   next();
 }
 
@@ -89,7 +90,7 @@ export function requireAuth(req, res, next) {
 export function requireAppHeader(req, res, next) {
   if (req.method === 'GET' || req.method === 'HEAD') return next();
   if (req.get('X-Requested-With') !== 'stackpanel') {
-    return res.status(403).json({ error: 'Nieprawidłowe żądanie.' });
+    return res.status(403).json({ error: req.t('auth.badRequest') });
   }
   next();
 }
@@ -105,7 +106,7 @@ export function loginRateLimit(req, res, next) {
     return next();
   }
   if (++entry.count > 10) {
-    return res.status(429).json({ error: 'Za dużo prób logowania. Spróbuj za kilka minut.' });
+    return res.status(429).json({ error: req.t('auth.rateLimited') });
   }
   next();
 }

@@ -2,17 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { docker, parseJsonLines } from './docker.js';
 import { normalizeCompose, addImageVolumes, isFileLikeTarget } from './compose.js';
+import { UserError } from './errors.js';
 
 export const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,62}$/;
 const COMPOSE_FILES = ['compose.yaml', 'compose.yml', 'docker-compose.yaml', 'docker-compose.yml'];
 const ACTIONS = new Set(['up', 'stop', 'restart', 'down', 'update']);
-
-export class UserError extends Error {
-  constructor(message, status = 400) {
-    super(message);
-    this.status = status;
-  }
-}
 
 function writeAtomic(file, content) {
   const tmp = `${file}.tmp-${process.pid}`;
@@ -32,15 +26,14 @@ function parseLsStatus(status = '') {
   return { state, running, total };
 }
 
+// t = funkcja tłumacząca z i18n.js, przekazywana z żądania (język użytkownika).
 export function createStacks({ db, stacksDir, getSettings }) {
   const locks = new Set();
 
   const stackDir = (name) => path.join(stacksDir, name);
 
   function assertName(name) {
-    if (!NAME_RE.test(String(name || ''))) {
-      throw new UserError('Nazwa może zawierać tylko małe litery, cyfry, "-" i "_" (np. "nextcloud").');
-    }
+    if (!NAME_RE.test(String(name || ''))) throw new UserError('stack.badName');
   }
 
   function composeFile(name) {
@@ -54,16 +47,12 @@ export function createStacks({ db, stacksDir, getSettings }) {
   function requireStack(name) {
     assertName(name);
     const file = composeFile(name);
-    if (!file) throw new UserError('Nie ma takiego stacka.', 404);
+    if (!file) throw new UserError('stack.notFound', {}, 404);
     return file;
   }
 
-  function stackRow(name) {
-    return db.prepare('SELECT auto_volumes FROM stacks WHERE name = ?').get(name);
-  }
-
   function autoVolumes(name) {
-    const row = stackRow(name);
+    const row = db.prepare('SELECT auto_volumes FROM stacks WHERE name = ?').get(name);
     return row ? row.auto_volumes === 1 : true;
   }
 
@@ -135,8 +124,8 @@ export function createStacks({ db, stacksDir, getSettings }) {
         '-f', check, '--env-file', envCheck, 'config', '--quiet',
       ]);
       if (r.code !== 0) {
-        const msg = r.output.replaceAll(check, 'compose.yaml').replaceAll(envCheck, '.env').trim();
-        throw new UserError(`Docker odrzucił plik compose:\n${msg}`);
+        const output = r.output.replaceAll(check, 'compose.yaml').replaceAll(envCheck, '.env').trim();
+        throw new UserError('compose.rejected', { output });
       }
     } finally {
       fs.rmSync(check, { force: true });
@@ -144,19 +133,19 @@ export function createStacks({ db, stacksDir, getSettings }) {
     }
   }
 
+  // Zwraca { compose, changes[{key,vars}], warnings[{key,vars}] }.
   async function save(name, { compose, env = '', autoVolumes: auto }, { create = false } = {}) {
     assertName(name);
-    if (locks.has(name)) throw new UserError('Na tym stacku trwa właśnie operacja.', 409);
+    if (locks.has(name)) throw new UserError('stack.busy', {}, 409);
     const dir = stackDir(name);
     const existed = fs.existsSync(dir);
-    if (create && existed && composeFile(name)) throw new UserError('Stack o tej nazwie już istnieje.', 409);
-    if (!create && !composeFile(name)) throw new UserError('Nie ma takiego stacka.', 404);
+    if (create && existed && composeFile(name)) throw new UserError('stack.exists', {}, 409);
+    if (!create && !composeFile(name)) throw new UserError('stack.notFound', {}, 404);
 
     const useAuto = auto === undefined ? autoVolumes(name) : Boolean(auto);
-    const settings = getSettings();
 
     let result = { text: String(compose ?? ''), changes: [], warnings: [] };
-    if (useAuto) result = normalizeCompose(compose, settings);
+    if (useAuto) result = normalizeCompose(compose, getSettings());
 
     fs.mkdirSync(dir, { recursive: true });
     try {
@@ -183,7 +172,7 @@ export function createStacks({ db, stacksDir, getSettings }) {
 
   async function resolvedConfig(name, file) {
     const r = await docker([...base(name, file), 'config', '--format', 'json']);
-    if (r.code !== 0) throw new UserError(`Nie udało się odczytać konfiguracji:\n${r.output.trim()}`);
+    if (r.code !== 0) throw new UserError('compose.configFailed', { output: r.output.trim() });
     return JSON.parse(r.stdout);
   }
 
@@ -207,36 +196,35 @@ export function createStacks({ db, stacksDir, getSettings }) {
     }
     for (const dir of created) {
       fs.mkdirSync(dir);
-      try { fs.chownSync(dir, uid, gid); } catch { /* panel bez roota – trudno */ }
+      try { fs.chownSync(dir, uid, gid); } catch { /* np. macOS albo panel bez roota */ }
     }
     return created.length > 0;
   }
 
-  async function prepare(name, log) {
+  async function prepare(name, log, t) {
     let file = requireStack(name);
     const dir = stackDir(name);
     const settings = getSettings();
 
     if (autoVolumes(name)) {
-      let cfg = await resolvedConfig(name, file);
+      const cfg = await resolvedConfig(name, file);
       const missing = {};
       for (const [svc, def] of Object.entries(cfg.services || {})) {
         if (!def.image) continue;
         let declared = await imageVolumes(def.image);
         if (declared === null) {
-          log(`Pobieram obraz ${def.image}, żeby sprawdzić, gdzie trzyma dane...\n`);
+          log(t('log.pulling', { image: def.image }) + '\n');
           await docker([...base(name, file), 'pull', svc], { onData: log });
           declared = (await imageVolumes(def.image)) ?? [];
         }
         const covered = new Set((def.volumes || []).map((v) => String(v.target).replace(/\/+$/, '')));
-        const todo = declared.filter((t) => !covered.has(t.replace(/\/+$/, '')));
+        const todo = declared.filter((p) => !covered.has(p.replace(/\/+$/, '')));
         if (todo.length) missing[svc] = todo;
       }
       if (Object.keys(missing).length) {
-        const current = fs.readFileSync(file, 'utf8');
-        const res = addImageVolumes(current, missing);
+        const res = addImageVolumes(fs.readFileSync(file, 'utf8'), missing);
         writeAtomic(file, res.text);
-        for (const c of res.changes) log(`[wolumeny] ${c}\n`);
+        for (const c of res.changes) log(`[volumes] ${t(c.key, c.vars)}\n`);
         file = requireStack(name);
       }
     }
@@ -251,30 +239,24 @@ export function createStacks({ db, stacksDir, getSettings }) {
         if (!src.startsWith(dir + path.sep)) continue;
         if (fs.existsSync(src)) continue;
         if (isFileLikeTarget(v.target)) {
-          missingFiles.push(`${svc}: ${path.relative(dir, src)} (montowany jako ${v.target})`);
+          missingFiles.push(`  - ${svc}: ${path.relative(dir, src)} → ${v.target}`);
           continue;
         }
         if (mkdirOwned(src, dir, settings.puid, settings.pgid)) {
-          log(`[wolumeny] utworzono ${path.relative(dir, src)} (właściciel ${settings.puid}:${settings.pgid})\n`);
+          log(t('log.created', { path: path.relative(dir, src), owner: `${settings.puid}:${settings.pgid}` }) + '\n');
         }
       }
     }
-    if (missingFiles.length) {
-      throw new UserError(
-        `Brakuje plików konfiguracyjnych, które aplikacja montuje jako pojedyncze pliki:\n` +
-        missingFiles.map((f) => `  - ${f}`).join('\n') +
-        `\nWgraj je do folderu stacka i uruchom ponownie (Docker utworzyłby w ich miejscu pusty folder).`
-      );
-    }
+    if (missingFiles.length) throw new UserError('files.missing', { list: missingFiles.join('\n') });
     return file;
   }
 
   // ---------- akcje ----------
 
-  async function action(name, act, write, signal) {
-    if (!ACTIONS.has(act)) throw new UserError('Nieznana akcja.');
+  async function action(name, act, write, { signal, t }) {
+    if (!ACTIONS.has(act)) throw new UserError('action.unknown');
     let file = requireStack(name);
-    if (locks.has(name)) throw new UserError('Na tym stacku trwa już inna operacja.', 409);
+    if (locks.has(name)) throw new UserError('stack.busy', {}, 409);
     locks.add(name);
 
     const op = db.prepare(`INSERT INTO operations(stack, action, status) VALUES (?, ?, 'running')`).run(name, act);
@@ -287,20 +269,20 @@ export function createStacks({ db, stacksDir, getSettings }) {
     const step = async (args) => {
       log(`$ docker compose ${args.join(' ')}\n`);
       const r = await docker([...base(name, file), ...args], { onData: log, signal });
-      if (r.code !== 0) throw new UserError(`Polecenie zakończyło się kodem ${r.code}.`);
+      if (r.code !== 0) throw new UserError('step.exitCode', { code: r.code });
     };
 
     let ok = false;
     try {
       switch (act) {
         case 'up':
-          file = await prepare(name, log);
+          file = await prepare(name, log, t);
           await step(['up', '-d', '--remove-orphans']);
           break;
         case 'update':
           // Tu w etapie 3 wejdzie automatyczny backup przed aktualizacją.
           await step(['pull']);
-          file = await prepare(name, log);
+          file = await prepare(name, log, t);
           await step(['up', '-d', '--remove-orphans']);
           break;
         case 'stop':
@@ -314,9 +296,10 @@ export function createStacks({ db, stacksDir, getSettings }) {
           break;
       }
       ok = true;
-      log('\nGotowe.\n');
+      log(`\n${t('log.done')}\n`);
     } catch (err) {
-      log(`\nBłąd: ${err.message}\n`);
+      const message = err instanceof UserError ? t(err.key, err.vars) : err.message;
+      log(`\n${t('log.error', { message })}\n`);
     } finally {
       db.prepare(`UPDATE operations SET status = ?, output = ?, finished_at = datetime('now') WHERE id = ?`)
         .run(ok ? 'ok' : 'error', output, op.lastInsertRowid);
@@ -327,20 +310,20 @@ export function createStacks({ db, stacksDir, getSettings }) {
 
   async function logs(name, { tail = 200, follow = false }, write, signal) {
     const file = requireStack(name);
-    const t = Math.min(Math.max(parseInt(tail, 10) || 200, 1), 5000);
-    const args = [...base(name, file), 'logs', '--no-color', '--timestamps', '--tail', String(t)];
+    const n = Math.min(Math.max(parseInt(tail, 10) || 200, 1), 5000);
+    const args = [...base(name, file), 'logs', '--no-color', '--timestamps', '--tail', String(n)];
     if (follow) args.push('--follow');
     await docker(args, { onData: write, signal });
   }
 
-  async function remove(name, write) {
+  async function remove(name, write, t) {
     const file = requireStack(name);
-    if (locks.has(name)) throw new UserError('Na tym stacku trwa operacja.', 409);
+    if (locks.has(name)) throw new UserError('stack.busy', {}, 409);
     locks.add(name);
     try {
       write(`$ docker compose down --remove-orphans\n`);
       const r = await docker([...base(name, file), 'down', '--remove-orphans'], { onData: write });
-      if (r.code !== 0) throw new UserError('Nie udało się zatrzymać stacka – nic nie usunięto.');
+      if (r.code !== 0) throw new UserError('remove.stopFailed');
       // Nie kasujemy danych na stałe: folder trafia do kosza.
       const trash = path.join(stacksDir, '.trash');
       fs.mkdirSync(trash, { recursive: true });
@@ -348,7 +331,7 @@ export function createStacks({ db, stacksDir, getSettings }) {
       const dest = path.join(trash, `${name}-${stamp}`);
       fs.renameSync(stackDir(name), dest);
       db.prepare('DELETE FROM stacks WHERE name = ?').run(name);
-      write(`Folder stacka przeniesiono do ${dest}\n`);
+      write(t('log.movedToTrash', { path: dest }) + '\n');
     } finally {
       locks.delete(name);
     }

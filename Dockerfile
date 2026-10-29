@@ -9,9 +9,13 @@ RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit
 FROM node:22-alpine
 WORKDIR /app
 
+LABEL org.opencontainers.image.title="stackpanel" \
+      org.opencontainers.image.description="Simple web UI for Docker Compose stacks" \
+      org.opencontainers.image.licenses="AGPL-3.0-only"
+
 # Klient Dockera i wtyczka compose (statyczne binarki z oficjalnego obrazu).
-COPY --from=docker:27-cli /usr/local/bin/docker /usr/local/bin/docker
-COPY --from=docker:27-cli /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/libexec/docker/cli-plugins/docker-compose
+COPY --from=docker:cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker:cli /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/libexec/docker/cli-plugins/docker-compose
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./

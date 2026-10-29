@@ -24,7 +24,7 @@ export function docker(args, { cwd, onData, signal } = {}) {
     try {
       child = spawn('docker', args, { cwd, env: ENV });
     } catch (err) {
-      const msg = `Nie udało się uruchomić docker: ${err.message}\n`;
+      const msg = `docker: ${err.message}\n`;
       onData?.(msg);
       return resolve({ code: 127, stdout: '', output: msg });
     }
@@ -45,7 +45,7 @@ export function docker(args, { cwd, onData, signal } = {}) {
     signal?.addEventListener('abort', abort, { once: true });
 
     child.on('error', (err) => {
-      const msg = `Nie udało się uruchomić docker: ${err.message}\n`;
+      const msg = `docker: ${err.message}\n`;
       keep(msg);
       onData?.(msg);
     });
