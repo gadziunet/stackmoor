@@ -57,7 +57,7 @@ Give every stack an address like `cloud.home.example.com` with a real HTTPS cert
 2. In your DNS create an A record `*.home.example.com` → the server's IP (a local IP is fine).
 3. **Stack → Domain:** choose a subdomain, the service and its port inside the container.
 
-Stackmoor runs Caddy in its own container (`stackmoor-caddy`) with one wildcard certificate for all apps. The DNS provider can be changed any time in Settings. On Unraid, ports 80/443 are used by its web UI – choose other ports under *Advanced*.
+Stackmoor runs Caddy in its own container (`stackmoor-caddy`) with one wildcard certificate for all apps. Caddy is updated together with the panel – each release ships its own Caddy image. The DNS provider can be changed any time in Settings. On Unraid, ports 80/443 are used by its web UI – choose other ports under *Advanced*.
 
 **The panel's own address.** Set *Address of this panel* (e.g. `stackmoor`) and the panel is also available at `https://stackmoor.home.example.com`. Once you open it there, you can turn on *Allow opening the panel only through this address* – access by IP address is then blocked and the panel only opens at its domain. If the domain ever stops working, unlock it with:
 
@@ -86,7 +86,9 @@ docker exec stackmoor node src/cli.js unlock
 - [x] Cloudron-style backups – per stack, automatically before updates, database dumps, schedule, retention, encryption; restic to S3 / Backblaze B2; restore and clone
 - [x] Setup wizard: fresh install or restore a whole server from a backup
 - [x] Updates: check for new Stackmoor versions and new stack images (on/off in Settings), show what is new and update only after confirmation
-- [ ] Notifications (e-mail, ntfy, Pushover, webhooks)
+- [ ] Notifications (e-mail, Telegram, ntfy, Pushover, webhooks)
+- [ ] VPN (WireGuard) for chosen stacks – e.g. reach your servers from a fixed address
+- [ ] Setup wizard: start with the IP address or set up the domain right away
 - [ ] Unraid Community Apps template
 
 ## Development

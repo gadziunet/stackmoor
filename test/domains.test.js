@@ -52,3 +52,13 @@ test('certificate errors: only after the last success, never "context canceled"'
   const failing = `${logs}\n${line({ level: 'error', msg: 'job failed', error: 'DNS: unauthorized' })}`;
   assert.deepEqual(certErrors(failing), ['job failed: DNS: unauthorized']);
 });
+
+test('Caddy image follows the panel version', async () => {
+  const { caddyImageFor, DEFAULT_PANEL_SUBDOMAIN } = await import('../src/domains.js');
+  assert.equal(caddyImageFor('0.6.1', true), 'ghcr.io/gadziunet/stackmoor-caddy:0.6.1');
+  assert.equal(caddyImageFor('v0.7.0', true), 'ghcr.io/gadziunet/stackmoor-caddy:0.7.0');
+  assert.equal(caddyImageFor('edge', true), 'ghcr.io/gadziunet/stackmoor-caddy:edge');
+  // Local runs (no CI version) have no image of their own.
+  assert.equal(caddyImageFor('0.6.0', false), 'ghcr.io/gadziunet/stackmoor-caddy:latest');
+  assert.equal(DEFAULT_PANEL_SUBDOMAIN, 'my');
+});

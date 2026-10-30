@@ -472,6 +472,48 @@ function renderNew() {
   });
 }
 
+/**
+ * Addresses where a stack's app can be opened: its domains when it has any,
+ * otherwise the published TCP ports on the address the panel is opened from.
+ */
+function openTargets(routesInfo, containers) {
+  if (routesInfo?.domain && routesInfo.routes?.length) {
+    return [...new Set(routesInfo.routes.map((r) => `https://${r.subdomain}.${routesInfo.domain}`))];
+  }
+  const host = location.hostname.includes(':') ? `[${location.hostname}]` : location.hostname;
+  const urls = [];
+  for (const c of containers || []) {
+    for (const p of c.ports || []) {
+      const m = /^(\d+)→(\d+)\/tcp$/.exec(p);
+      if (!m) continue;
+      const scheme = m[2] === '443' ? 'https' : 'http';
+      urls.push(`${scheme}://${host}:${m[1]}`);
+    }
+  }
+  return [...new Set(urls)];
+}
+
+// Close an open "Open" menu when clicking anywhere else.
+document.addEventListener('click', (e) => {
+  document.querySelectorAll('details.open-menu[open]').forEach((d) => { if (!d.contains(e.target) || e.target.closest('.menu a')) d.open = false; });
+});
+
+/** The "Open" button next to Start/Restart…: one link, or a small menu when there are several. */
+async function fillOpenButton(name, containers) {
+  const info = await api('GET', `/api/stacks/${name}/routes`).catch(() => null);
+  const slot = document.getElementById('open-slot');
+  if (!slot) return;
+  const urls = openTargets(info, containers);
+  const label = (u) => esc(u.replace(/^https?:\/\//, ''));
+  if (!urls.length) slot.innerHTML = '';
+  else if (urls.length === 1) {
+    slot.innerHTML = `<a class="btn" href="${esc(urls[0])}" target="_blank" rel="noopener" title="${esc(urls[0])}">${t('act.open')} ↗</a>`;
+  } else {
+    slot.innerHTML = `<details class="open-menu"><summary class="btn">${t('act.open')} ▾</summary>
+      <div class="menu">${urls.map((u) => `<a href="${esc(u)}" target="_blank" rel="noopener">${label(u)} ↗</a>`).join('')}</div></details>`;
+  }
+}
+
 async function renderStack(name) {
   const main = document.getElementById('main');
   main.innerHTML = `<p class="hint">${t('stack.loading')}</p>`;
@@ -494,6 +536,7 @@ async function renderStack(name) {
         <button class="btn" data-act="update" title="${esc(t('act.updateTitle'))}">${t('act.update')}</button>
         <button class="btn" data-act="stop">${t('act.stop')}</button>
         <button class="btn" data-act="down" title="${esc(t('act.downTitle'))}">${t('act.down')}</button>
+        <span id="open-slot"></span>
       </div>
     </div>
     <div id="notice"></div>
@@ -503,6 +546,8 @@ async function renderStack(name) {
         .map((k, i) => `<button data-tab="${k}" class="${i === 0 ? 'on' : ''}">${t(`tab.${k}`)}</button>`).join('')}
     </div>
     <div id="tab"></div>`;
+
+  fillOpenButton(name, data.containers);
 
   let autostart = false;
   if (state.pendingNotice?.name === name) {
@@ -847,6 +892,7 @@ async function renderStack(name) {
         data.compose = fresh.compose;
         data.containers = fresh.containers;
         if (currentTab === 'compose' || currentTab === 'containers') tabs[currentTab]();
+        fillOpenButton(name, data.containers);
       }
     }
   }
@@ -973,17 +1019,6 @@ function settingsUpdates(body, s) {
         : `<p class="hint">${u.lastRun ? t('upd.stacksNone') : t('upd.never')}</p>`}
     </div>
 
-    ${u.caddy ? `<div class="card">
-      <h2>${t('upd.caddyTitle')}</h2>
-      <p class="hint" style="margin-top:-4px">${t('upd.caddyLead')}</p>
-      ${u.caddy.updateAvailable
-        ? `<div class="notice info"><strong>${t('upd.caddyNew')}</strong>
-            <p class="hint" style="margin:6px 0 10px">${t('upd.caddyHow')}</p>
-            <button type="button" class="btn primary" id="caddy-upd">${t('upd.caddyApply')}</button></div>`
-        : `<p class="hint">${u.caddy.updateAvailable === false ? t('upd.caddyOk') : t('upd.caddyUnknown')}</p>`}
-      <pre class="terminal" id="caddy-term" hidden></pre>
-    </div>` : ''}
-
     <form class="card" id="upd-form">
       <h2>${t('upd.settingsTitle')}</h2>
       <label class="check field"><input type="checkbox" id="upd-on" ${s.updateCheck ? 'checked' : ''}>
@@ -999,27 +1034,6 @@ function settingsUpdates(body, s) {
       <div id="upd-form-out"></div>
       <button class="btn primary">${t('set.save')}</button>
     </form>`;
-
-  document.getElementById('caddy-upd')?.addEventListener('click', async (e) => {
-    e.target.disabled = true;
-    const pre = document.getElementById('caddy-term');
-    pre.hidden = false;
-    pre.textContent = '';
-    const code = await stream('POST', '/api/domains/update-caddy', (txt) => appendTo(pre, txt)).catch((err) => {
-      appendTo(pre, `\n${err.message}\n`);
-      return 1;
-    });
-    toast(t(code === 0 ? 'toast.done' : 'toast.failed'));
-    if (code === 0) {
-      setTimeout(async () => {
-        state.updates = await api('GET', '/api/updates').catch(() => state.updates);
-        renderUpdateBadge();
-        if (route().tab === 'updates') settingsUpdates(body, s);
-      }, 3000);
-    } else {
-      e.target.disabled = false;
-    }
-  });
 
   document.getElementById('upd-check').addEventListener('click', async (e) => {
     e.target.disabled = true;
@@ -1105,6 +1119,7 @@ async function settingsDomains(body) {
         ${st.panelUrl ? `<span>${t('dom.panelUrl')}</span><a href="${esc(st.panelUrl)}">${esc(st.panelUrl.replace('https://', ''))}</a>` : ''}
       </div>
       ${st.errors?.length ? `<div class="notice error">${st.errors.map(esc).join('\n')}</div>` : ''}
+      ${st.imageProblem ? `<div class="notice info">${t('dom.caddyImageProblem', { image: esc(st.imageProblem) })}</div>` : ''}
       <p class="hint">${t('dom.dnsRecord', { domain: esc(st.domain) })}</p>
       <button type="button" class="btn small" id="dom-refresh">${t('logs.refresh')}</button>
     </div>`;
@@ -1120,7 +1135,7 @@ async function settingsDomains(body) {
       <h2>${t('dom.panelTitle')}</h2>
       <div class="field"><label for="dom-panel">${t('dom.panelSub')}</label>
         <div class="row" style="align-items:center;gap:6px;flex-wrap:nowrap">
-          <input type="text" id="dom-panel" value="${esc(d.panelSubdomain)}" placeholder="stackmoor" autocapitalize="off" autocomplete="off" style="flex:1;min-width:0">
+          <input type="text" id="dom-panel" value="${esc(d.panelSubdomain)}" placeholder="my" autocapitalize="off" autocomplete="off" style="flex:1;min-width:0">
           <span class="hint" style="white-space:nowrap">.${esc(d.domain)}</span>
         </div>
         <p class="hint">${t('dom.panelSubHint')}</p>
@@ -1638,7 +1653,7 @@ function settingsAccount(body) {
       <div id="pw-out"></div>
       <button class="btn">${t('pw.submit')}</button>
     </form>
-    <div class="card">
+    <div class="card phone-only">
       <h2>${t('nav.logout')}</h2>
       <p class="hint">${t('acc.signedInAs', { user: esc(state.user?.username || '') })}</p>
       <button type="button" class="btn" id="acc-logout">${t('nav.logout')}</button>
@@ -1665,8 +1680,7 @@ function renderUpdateBadge() {
   const el = document.getElementById('panel-update');
   if (!el) return;
   const p = state.updates?.panel;
-  const caddy = state.updates?.caddy?.updateAvailable;
-  el.hidden = !p?.updateAvailable && !caddy;
+  el.hidden = !p?.updateAvailable;
   el.textContent = p?.updateAvailable
     ? (p.buildUpdate ? t('upd.badgeBuild') : t('upd.badge', { version: showVersion(p.latest) }))
     : t('upd.badgeBuild');

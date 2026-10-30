@@ -9,6 +9,7 @@ import { encrypt, decrypt, mask } from './secrets.js';
 import { PROVIDERS, providerById, providerJson } from './dns-providers.js';
 import { publishedPorts, findConflicts } from './ports.js';
 import { certErrors } from './caddy-logs.js';
+import { VERSION, isSemver } from './version.js';
 
 // Local domains: one Caddy container ("stackmoor-caddy") in front of all stacks.
 // - It holds one wildcard certificate (*.domain) obtained through the DNS provider's API,
@@ -30,9 +31,22 @@ const writeFile = (file, content, mode = 0o644) => {
   fs.renameSync(tmp, file);
 };
 
+/**
+ * Caddy goes with the panel: a release uses the Caddy image built for the same tag
+ * (panel 0.6.1 → stackmoor-caddy:0.6.1), edge uses :edge. Updating the panel is all it takes.
+ */
+export function caddyImageFor(version = VERSION, fromCi = Boolean(process.env.APP_VERSION)) {
+  const tag = version === 'edge' ? 'edge' : (fromCi && isSemver(version) ? String(version).replace(/^v/, '') : 'latest');
+  return `ghcr.io/gadziunet/stackmoor-caddy:${tag}`;
+}
+
+/** The panel's own address under a newly added domain, like Cloudron's my.<domain>. */
+export const DEFAULT_PANEL_SUBDOMAIN = 'my';
+
 export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings }) {
   const caddyDir = path.join(stacksDir, '.stackmoor', 'caddy');
-  const image = process.env.STACKMOOR_CADDY_IMAGE || 'ghcr.io/gadziunet/stackmoor-caddy:latest';
+  const image = process.env.STACKMOOR_CADDY_IMAGE || caddyImageFor();
+  const followsTag = image.endsWith(':edge') || image.endsWith(':latest'); // moving tags: pull to see changes
   const panelPort = Number(process.env.PORT || 5001);
 
   // ---------- credentials ----------
@@ -84,7 +98,12 @@ export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings
     if (domain && provider !== 'internal' && !providerById(provider)) throw new UserError('dns.badProvider');
 
     // The panel address has its own section; the main form leaves it as it is.
-    const panelSubdomain = String(body.panelSubdomain ?? saved.panelSubdomain ?? '').trim().toLowerCase();
+    let panelSubdomain = String(body.panelSubdomain ?? saved.panelSubdomain ?? '').trim().toLowerCase();
+    // First domain: give the panel my.<domain> right away (it can be changed or cleared later).
+    if (domain && !saved.domain && !panelSubdomain && body.panelSubdomain === undefined
+      && !db.prepare('SELECT 1 FROM routes WHERE subdomain = ?').get(DEFAULT_PANEL_SUBDOMAIN)) {
+      panelSubdomain = DEFAULT_PANEL_SUBDOMAIN;
+    }
     if (panelSubdomain && !SUBDOMAIN_RE.test(panelSubdomain)) throw new UserError('dns.badSubdomain', { sub: panelSubdomain });
     if (panelSubdomain && db.prepare('SELECT 1 FROM routes WHERE subdomain = ?').get(panelSubdomain)) {
       throw new UserError('dns.subdomainTaken', { sub: panelSubdomain });
@@ -397,17 +416,36 @@ export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings
     return caddyIp;
   }
 
-  /** Pulls the newest Caddy image and recreates the container (certificates are kept in ./data). */
-  async function updateCaddy(log, t) {
-    if (!getSettings().domain || !fs.existsSync(path.join(caddyDir, 'compose.yaml'))) throw new UserError('dns.noDomain');
-    log(`$ docker compose -p ${CADDY} pull\n`);
-    const pull = await docker([...composeArgs(), 'pull'], { onData: log });
-    if (pull.code !== 0) throw new UserError('step.exitCode', { code: pull.code });
-    log(`$ docker compose -p ${CADDY} up -d\n`);
-    const up = await docker([...composeArgs(), 'up', '-d', '--remove-orphans'], { onData: log });
-    if (up.code !== 0) throw new UserError('step.exitCode', { code: up.code });
+  /**
+   * After a panel update: switch Caddy to the image that belongs to this panel version.
+   * Runs on start and every few hours (the Caddy image of a release may be published a bit
+   * after the panel's). If the image can't be pulled, the old Caddy keeps running.
+   */
+  async function syncImage() {
+    const s = getSettings();
+    if (!s.domain || !fs.existsSync(path.join(caddyDir, 'compose.yaml'))) return { changed: false };
+    const local = () => docker(['image', 'inspect', '--format', '{{.Id}}', image]);
+    let want = await local();
+    if (followsTag || want.code !== 0) {
+      const pull = await docker(['pull', '--quiet', image]);
+      if (pull.code !== 0 && want.code !== 0) {
+        setState(db, 'caddy.image', { image, ok: false, at: new Date().toISOString() });
+        return { changed: false, error: 'pull' };
+      }
+      want = await local();
+    }
+    const cur = await docker(['inspect', '--format', '{{.Image}}', CADDY]);
+    if (cur.code === 0 && cur.stdout.trim() === want.stdout.trim()) {
+      setState(db, 'caddy.image', { image, ok: true, at: new Date().toISOString() });
+      return { changed: false };
+    }
+    // Certificates live in ./data, so recreating the container keeps them.
+    writeFile(path.join(caddyDir, 'compose.yaml'), stringify(caddyCompose(s)));
+    const up = await docker([...composeArgs(), 'up', '-d', '--remove-orphans']);
+    setState(db, 'caddy.image', { image, ok: up.code === 0, at: new Date().toISOString() });
+    if (up.code !== 0) return { changed: false, error: 'up' };
     await refreshCaddyIp();
-    log(t('dns.log.caddyUpdated') + '\n');
+    return { changed: true };
   }
 
   /** Is Caddy running, is there a certificate, and the latest certificate errors. */
@@ -424,11 +462,13 @@ export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings
       const logs = await docker(['logs', '--since', '24h', '--tail', '500', CADDY]);
       errors = certErrors(logs.output);
     }
-    return { enabled: true, running, certificate, errors, domain: s.domain, panelUrl: panelUrl(s) };
+    const img = getState(db, 'caddy.image');
+    const imageProblem = img && !img.ok && img.image === image ? image : null;
+    return { enabled: true, running, certificate, errors, domain: s.domain, panelUrl: panelUrl(s), imageProblem };
   }
 
   return {
     publicConfig, saveConfig, routes, setRoutes, removeStack, writeOverride, apply, status, buildConfig,
-    panelUrl, refreshCaddyIp, attachSelf, savePanel, reloadConfig, updateCaddy, caddyIp: () => caddyIp,
+    panelUrl, refreshCaddyIp, attachSelf, savePanel, reloadConfig, syncImage, caddyIp: () => caddyIp,
   };
 }

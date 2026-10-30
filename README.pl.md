@@ -66,7 +66,7 @@ Każdy stack może dostać adres typu `chmura.dom.example.com` z prawdziwym cert
 2. W DNS utwórz rekord A `*.dom.example.com` → adres IP serwera (lokalny adres jest w porządku).
 3. **Stack → Domena:** wybierz subdomenę, usługę i jej port w kontenerze.
 
-Stackmoor uruchamia Caddy we własnym kontenerze (`stackmoor-caddy`) z jednym certyfikatem wildcard dla wszystkich aplikacji. Dostawcę DNS można zmienić w każdej chwili w Ustawieniach. Na Unraid porty 80/443 zajmuje jego panel – wybierz inne w sekcji *Zaawansowane*.
+Stackmoor uruchamia Caddy we własnym kontenerze (`stackmoor-caddy`) z jednym certyfikatem wildcard dla wszystkich aplikacji. Caddy aktualizuje się razem z panelem – każde wydanie ma własny obraz Caddy. Dostawcę DNS można zmienić w każdej chwili w Ustawieniach. Na Unraid porty 80/443 zajmuje jego panel – wybierz inne w sekcji *Zaawansowane*.
 
 **Adres samego panelu.** Wpisz *Adres tego panelu* (np. `stackmoor`), a panel będzie dostępny także pod `https://stackmoor.dom.example.com`. Gdy otworzysz go pod tym adresem, możesz włączyć *Panel tylko pod tym adresem* – wejście przez adres IP zostanie wtedy zablokowane, a panel otworzy się tylko pod swoją domeną. Gdyby domena kiedyś przestała działać, odblokujesz panel poleceniem:
 
@@ -95,7 +95,9 @@ docker exec stackmoor node src/cli.js unlock
 - [x] Backupy jak w Cloudronie – per stack, automatycznie przed aktualizacją, dumpy baz, harmonogram, retencja, szyfrowanie; restic do S3 / Backblaze B2; przywracanie i klonowanie
 - [x] Kreator: nowa instalacja albo przywrócenie całego serwera z kopii
 - [x] Aktualizacje: sprawdzanie nowych wersji Stackmoor i nowych obrazów stacków (włączane w Ustawieniach), pokazanie co nowego i aktualizacja dopiero po potwierdzeniu
-- [ ] Powiadomienia (e-mail, ntfy, Pushover, webhooki)
+- [ ] Powiadomienia (e-mail, Telegram, ntfy, Pushover, webhooki)
+- [ ] VPN (WireGuard) dla wybranych stacków – np. łączenie z serwerami ze stałego adresu
+- [ ] Kreator: start po adresie IP albo od razu z domeną
 - [ ] Szablon Unraid w Community Apps
 
 ## Rozwój

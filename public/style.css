@@ -188,6 +188,8 @@ td code { font-size: 12.5px; }
 /* ---------- phone ---------- */
 .lbl-short { display: none; }
 .bottom-nav { display: none; }
+/* Only on phones, where the sidebar (with its Log out button) is hidden. */
+@media (min-width: 761px) { .phone-only { display: none; } }
 
 /* ---------- phone: top bar + bottom navigation ---------- */
 @media (max-width: 760px) {
@@ -232,6 +234,19 @@ td code { font-size: 12.5px; }
 .route-host span { color: var(--muted); font-size: 14px; white-space: nowrap; flex: none; }
 .route-row select.lang { width: 100%; min-height: 38px; }
 details > summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+/* "Open" menu next to the stack actions (several domains or ports). */
+#open-slot:empty { display: none; }
+.open-menu { position: relative; display: inline-block; }
+.open-menu > summary.btn { list-style: none; color: var(--text); font-size: inherit; }
+.open-menu > summary::-webkit-details-marker { display: none; }
+.open-menu .menu {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 220px; max-width: 80vw;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .12);
+}
+.open-menu .menu a { display: block; padding: 8px 10px; border-radius: 6px; color: var(--text); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.open-menu .menu a:hover { background: var(--sunken); }
+@media (max-width: 760px) { .open-menu .menu { right: auto; left: 0; } }
 @media (max-width: 760px) {
   .route-row { grid-template-columns: 1fr 1fr; }
   .route-host { grid-column: 1 / -1; }

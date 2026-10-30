@@ -56,7 +56,11 @@ app.use(express.json({ limit: '1mb' }));
 app.use(i18nMiddleware);
 
 // ---------- panel only through its domain ----------
-domains.attachSelf().catch(() => {}).then(() => domains.refreshCaddyIp()).catch(() => {});
+domains.attachSelf().catch(() => {})
+  .then(() => domains.syncImage()).catch(() => {})
+  .then(() => domains.refreshCaddyIp()).catch(() => {});
+// Caddy follows the panel version; retry now and then in case its image was published later.
+setInterval(() => { domains.syncImage().catch(() => {}); }, 6 * 3600_000).unref();
 // After restoring a whole server: start Caddy with the restored domain settings.
 backups.hooks.afterServerRestore = async (log, t) => {
   if (!getSettings(db).domain) return;
@@ -344,18 +348,6 @@ app.put('/api/domains', wrap(async (req, res) => {
 app.put('/api/domains/panel', wrap(async (req, res) => {
   await domains.savePanel(req.body || {}, req.hostname);
   res.json(domains.publicConfig());
-}));
-
-app.post('/api/domains/update-caddy', wrap(async (req, res) => {
-  const write = openStream(res);
-  let ok = true;
-  await domains.updateCaddy(write, req.t).catch((err) => {
-    ok = false;
-    write(`\n${req.t('log.error', { message: errorText(req, err) })}\n`);
-  });
-  write(`\n__EXIT__:${ok ? 0 : 1}\n`);
-  res.end();
-  updates.checkCaddy().catch(() => {});
 }));
 
 app.post('/api/domains/apply', wrap(async (req, res) => {
