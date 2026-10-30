@@ -29,7 +29,8 @@ jobs:
         run: bash -n install.sh && shellcheck -S warning install.sh
 
   image:
-    needs: test
+    # After the Caddy image: a panel release switches Caddy to the image with its own tag.
+    needs: [test, caddy-image]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
