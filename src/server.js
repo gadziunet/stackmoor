@@ -38,6 +38,7 @@ if (!stacksDirOk) {
 }
 const stacks = createStacks({ db, stacksDir: config.stacksDir, getSettings: () => getSettings(db) });
 const updates = createUpdates({ db, stacks, getSettings: () => getSettings(db) });
+updates.afterStart();
 updates.startScheduler();
 // Language for things that run on their own (scheduled backups): the one the admin last used.
 let lastLang = getState(db, 'ui.lang', 'en');
@@ -49,6 +50,8 @@ const domains = createDomains({
   saveSettings: (patch) => saveSettings(db, patch),
 });
 
+// Changes with every start – the page uses it to notice that the panel restarted.
+const BOOT_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 'loopback, linklocal, uniquelocal');
@@ -110,6 +113,8 @@ app.get('/api/state', (req, res) => {
     restoring: Boolean(backups.serverRestoreStatus() && !backups.serverRestoreStatus().done),
     user: req.user ? { username: req.user.username } : null,
     version: VERSION,
+    bootId: BOOT_ID,
+    ...(req.user ? { updating: updates.applying() } : {}),
     ...(req.user ? { stacksDir: config.stacksDir, stacksDirOk: stacksDirOk } : {}),
   });
 });
@@ -246,6 +251,7 @@ app.post('/api/stacks/:name/actions/:action', wrap(async (req, res) => {
 // ---------- updates ----------
 
 app.get('/api/updates', wrap(async (_req, res) => {
+  await updates.ready();
   res.json({ ...updates.status(), self: await updates.selfInfo().then((s) => ({ mode: s.mode, tag: s.tag })) });
 }));
 

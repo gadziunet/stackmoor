@@ -386,9 +386,10 @@ function renderShell() {
   renderUpdateBadge();
   const warn = document.getElementById('global-warning');
   if (warn) {
-    warn.innerHTML = state.stacksDirOk === false
+    warn.innerHTML = (state.stacksDirOk === false
       ? `<div class="notice error global">${t('warn.stacksDir', { dir: esc(state.stacksDir) })}</div>`
-      : '';
+      : '')
+      + (state.updating ? `<div class="notice info global">${t('upd.restarting')}</div>` : '');
   }
 }
 
@@ -1080,24 +1081,23 @@ function settingsUpdates(body, s) {
   });
 }
 
-// After a self-update the panel restarts: wait until it answers again, then reload.
+// After a self-update the panel restarts. Reload as soon as a new panel process answers
+// (its bootId changes); after 20 s reload anyway – if the update is still running,
+// the reloaded page shows the notice again and keeps waiting.
+let restartTimer = null;
 function waitForRestart() {
-  const before = state.version;
-  let sawDown = false;
+  if (restartTimer) return;
+  const before = state.bootId;
   const started = Date.now();
-  const timer = setInterval(async () => {
-    try {
-      const st = await fetch('/api/state', { cache: 'no-store' }).then((r) => r.json());
-      const v = showVersion(st.version);
-      if (sawDown || v !== before) {
-        clearInterval(timer);
-        location.reload();
-      }
-    } catch {
-      sawDown = true;
+  restartTimer = setInterval(async () => {
+    let st = null;
+    try { st = await fetch('/api/state', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)); } catch { /* panel is down */ }
+    // Reload only when the panel answers – never onto an error page while it is down.
+    if (st && (st.bootId !== before || Date.now() - started >= 20e3)) {
+      clearInterval(restartTimer);
+      location.reload();
     }
-    if (Date.now() - started > 5 * 60e3) clearInterval(timer);
-  }, 3000);
+  }, 2000);
 }
 
 async function settingsDomains(body) {
@@ -1716,6 +1716,8 @@ async function boot() {
   state.version = !s.version ? '' : /^\d/.test(s.version) ? `v${s.version}` : s.version;
   state.stacksDir = s.stacksDir;
   state.stacksDirOk = s.stacksDirOk;
+  state.bootId = s.bootId;
+  state.updating = Boolean(s.updating);
   if (state.user) {
     state.stacks = await api('GET', '/api/stacks').catch(() => []);
     state.updates = await api('GET', '/api/updates').catch(() => null);
@@ -1723,6 +1725,8 @@ async function boot() {
     state.refreshTimer = setInterval(refreshStacks, 10_000);
   }
   render();
+  // Opened (or reloaded) while a self-update is still running: keep waiting for the new panel.
+  if (state.user && state.updating) waitForRestart();
 }
 
 window.addEventListener('hashchange', render);

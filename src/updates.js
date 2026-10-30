@@ -90,6 +90,7 @@ export function createUpdates({ db, stacks, getSettings }) {
       const self = await selfInfo();
       result.updateAvailable = self.imageRef ? (await imageHasUpdate(self.imageRef)) === true : false;
       result.buildUpdate = result.updateAvailable;
+      result.imageId = self.imageId; // to notice later that this build was replaced
     }
     if (!result.latest && result.updateAvailable === undefined) result.error = true;
     setState(db, 'update.panel', result);
@@ -180,6 +181,26 @@ export function createUpdates({ db, stacks, getSettings }) {
     setInterval(tick, 3600e3).unref();
   }
 
+  /**
+   * Right after start: a saved "newer build available" for edge refers to the image we were
+   * running before. If the image changed (the panel was just updated), check again at once.
+   */
+  let startup = null;
+  function afterStart() {
+    setState(db, 'update.applying', null); // a new process means a pending self-update is done
+    const saved = getState(db, 'update.panel');
+    if (!saved?.buildUpdate) return null;
+    startup = (async () => {
+      const self = await selfInfo();
+      if (self.imageId && self.imageId !== saved.imageId) {
+        setState(db, 'update.panel', { ...saved, updateAvailable: false, buildUpdate: false });
+        await checkPanel().catch(() => {});
+      }
+    })().catch(() => {}).finally(() => { startup = null; });
+    return startup;
+  }
+  const ready = () => startup || Promise.resolve();
+
   // ---------- updating the panel (only after the user confirms) ----------
 
   async function updatePanel() {
@@ -200,8 +221,15 @@ export function createUpdates({ db, stacks, getSettings }) {
       '-c', script,
     ]);
     if (r.code !== 0) throw new UserError('updates.failed', { output: r.output.trim() });
+    setState(db, 'update.applying', { at: new Date().toISOString() });
     return { started: true };
   }
 
-  return { checkAll, checkStack, checkPanel, status, startScheduler, selfInfo, updatePanel };
+  /** A self-update was started in the last 10 minutes and this process is still the old one. */
+  function applying() {
+    const a = getState(db, 'update.applying');
+    return Boolean(a && Date.now() - Date.parse(a.at) < 10 * 60e3);
+  }
+
+  return { checkAll, checkStack, checkPanel, status, startScheduler, selfInfo, updatePanel, afterStart, ready, applying };
 }
