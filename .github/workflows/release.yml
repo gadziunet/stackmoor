@@ -29,8 +29,8 @@ jobs:
         run: bash -n install.sh && shellcheck -S warning install.sh
 
   image:
-    # After the Caddy image: a panel release switches Caddy to the image with its own tag.
-    needs: [test, caddy-image]
+    # After the Caddy and VPN images: a panel release switches them to the images with its own tag.
+    needs: [test, caddy-image, vpn-image]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
@@ -110,3 +110,43 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=caddy
           cache-to: type=gha,mode=max,scope=caddy
+
+  # WireGuard client with a kill switch, for "Connect through VPN" (ghcr.io/<owner>/stackmoor-vpn).
+  vpn-image:
+    needs: test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}-vpn
+          tags: |
+            type=edge,branch=main
+            type=semver,pattern={{version}}
+          flavor: |
+            latest=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: vpn
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=vpn
+          cache-to: type=gha,mode=max,scope=vpn
