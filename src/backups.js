@@ -4,10 +4,10 @@ import { spawn } from 'node:child_process';
 import { docker } from './docker.js';
 import { getState, setState } from './db.js';
 import { UserError } from './errors.js';
-import { encrypt, decrypt, mask } from './secrets.js';
+import { encrypt, decrypt, mask, initSecrets } from './secrets.js';
 import {
   DESTINATIONS, destinationById, repoUrl, dumpKind, dumpCommand, restoreCommand, readyCommand,
-  DUMP_FILE, dataFolders, containerName, retentionArgs, isDue, localParts,
+  DUMP_FILE, dataFolders, containerName, retentionArgs, isDue, localParts, newRunId, groupRuns,
 } from './backup-plan.js';
 
 // Backups with restic, the Cloudron way:
@@ -329,7 +329,7 @@ export function createBackups({ db, stacks, stacksDir, dataDir, sqlite }) {
   }
 
   /** The panel's own files: settings database (a consistent copy), its key, Caddy's files. */
-  async function backupSystem(log, t) {
+  async function backupSystem(tags, log, t) {
     const staging = path.join(dataDir, 'backup-system');
     fs.rmSync(staging, { recursive: true, force: true });
     fs.mkdirSync(staging, { recursive: true, mode: 0o700 });
@@ -341,7 +341,8 @@ export function createBackups({ db, stacks, stacksDir, dataDir, sqlite }) {
       const own = path.join(stacksDir, '.stackmoor');
       if (fs.existsSync(own)) paths.push(own);
       log('$ restic backup (system)\n');
-      const r = await restic(['backup', ...paths, '--host', HOST, '--json', '--tag', 'system'], log, { quiet: true });
+      const r = await restic(['backup', ...paths, '--host', HOST, '--json',
+        ...['system', ...tags].flatMap((tag) => ['--tag', tag])], log, { quiet: true });
       if (r.code !== 0 && r.code !== 3) throw new UserError('backup.resticFailed', { output: resticError(r) });
       log(t('backup.log.systemDone') + '\n');
     } finally {
@@ -349,10 +350,30 @@ export function createBackups({ db, stacks, stacksDir, dataDir, sqlite }) {
     }
   }
 
+  /**
+   * Retention: regular snapshots ("auto") and before-update snapshots are kept separately,
+   * each stack by its own history (grouped by path). Then unused data is removed once.
+   */
   async function forget(log) {
-    log('$ restic forget --prune\n');
-    const r = await restic(['forget', '--host', HOST, '--prune', ...retentionArgs(config())], log, { quiet: true });
-    if (r.code !== 0) log(resticError(r) + '\n');
+    await tagLegacy(log);
+    log('$ restic forget\n');
+    for (const tag of ['auto', 'pre-update']) {
+      const r = await restic(['forget', '--host', HOST, '--tag', tag, ...retentionArgs(config())], log, { quiet: true });
+      if (r.code !== 0) log(resticError(r) + '\n');
+    }
+    log('$ restic prune\n');
+    const p = await restic(['prune'], log, { quiet: true });
+    if (p.code !== 0) log(resticError(p) + '\n');
+  }
+
+  /** Snapshots made by 0.5 have no "auto" tag – add it, so the retention rules see them. */
+  async function tagLegacy(log) {
+    const r = await restic(['snapshots', '--json', '--host', HOST], log, { quiet: true });
+    if (r.code !== 0) return;
+    const ids = (JSON.parse(r.stdout || '[]') || [])
+      .filter((x) => !(x.tags || []).includes('auto') && !(x.tags || []).includes('pre-update'))
+      .map((x) => x.id);
+    if (ids.length) await restic(['tag', '--add', 'auto', ...ids], log, { quiet: true });
   }
 
   /** mode: 'quick' (structure), 'subset' (10% of the data), 'full' (all data). */
@@ -374,15 +395,16 @@ export function createBackups({ db, stacks, stacksDir, dataDir, sqlite }) {
       await restic(['unlock'], log, { quiet: true }); // removes stale locks only
       const failed = [];
       let added = 0;
+      const tags = ['auto', `run:${newRunId()}`, `kind:${kind}`];
       for (const s of await stacks.list()) {
         try {
-          added += (await backupStack(s.name, [], log, t)).added;
+          added += (await backupStack(s.name, tags, log, t)).added;
         } catch (err) {
           failed.push(s.name);
           log(t('backup.log.stackFailed', { stack: s.name, message: err.key ? t(err.key, err.vars) : err.message }) + '\n');
         }
       }
-      try { await backupSystem(log, t); } catch (err) {
+      try { await backupSystem(tags, log, t); } catch (err) {
         failed.push('system');
         log((err.key ? t(err.key, err.vars) : err.message) + '\n');
       }
@@ -398,9 +420,11 @@ export function createBackups({ db, stacks, stacksDir, dataDir, sqlite }) {
     }, extraLog);
   }
 
-  function backupOne(name, t, { tags = [], extraLog } = {}) {
+  function backupOne(name, t, { preUpdate = false, extraLog } = {}) {
     stacks.assertName(name);
-    return job(tags.includes('pre-update') ? 'pre-update' : 'manual', name, t, async (log) => {
+    const kind = preUpdate ? 'pre-update' : 'manual';
+    const tags = [preUpdate ? 'pre-update' : 'auto', `run:${newRunId()}`, `kind:${kind}`];
+    return job(kind, name, t, async (log) => {
       await ensureRepo(log);
       await restic(['unlock'], log, { quiet: true });
       const r = await backupStack(name, tags, log, t);
@@ -413,7 +437,7 @@ export function createBackups({ db, stacks, stacksDir, dataDir, sqlite }) {
     const c = config();
     if (!c.beforeUpdate || !configured(c)) return;
     log(t('backup.log.beforeUpdate') + '\n');
-    await backupOne(name, t, { tags: ['pre-update'], extraLog: log });
+    await backupOne(name, t, { preUpdate: true, extraLog: log });
   };
 
   // ---------- snapshots and restore ----------
@@ -446,6 +470,7 @@ export function createBackups({ db, stacks, stacksDir, dataDir, sqlite }) {
       stack: (s.tags || []).find((x) => x.startsWith('stack:'))?.slice(6) || null,
       system: (s.tags || []).includes('system'),
       preUpdate: (s.tags || []).includes('pre-update'),
+      run: (s.tags || []).find((x) => x.startsWith('run:'))?.slice(4) || null,
       size: s.summary?.total_bytes_processed ?? null,
     })).sort((a, b) => b.time.localeCompare(a.time));
     setState(db, 'backup.snapshots', { at: new Date().toISOString(), list });
@@ -466,67 +491,227 @@ export function createBackups({ db, stacks, stacksDir, dataDir, sqlite }) {
     throw new UserError('backup.dbNotReady', { container });
   }
 
+  /** Finds a snapshot by id (saved list first, then the bucket). */
+  async function findSnapshot(id) {
+    const match = (list) => list.find((s) => s.id === id || s.shortId === id);
+    return match(await snapshots()) || match(await snapshots({ fresh: true })) || null;
+  }
+
+  /** Restores one stack snapshot into stack `name`. Writes to out(). */
+  async function restoreStack(snap, name, log, t) {
+    // Everything is written to log() and also kept for the stack's history.
+    let output = '';
+    const out = (text) => { output += text; log(text); };
+    const work = async () => {
+      const dir = stacks.stackDir(name);
+      if (fs.existsSync(dir)) {
+        if (stacks.exists(name)) await stacks.compose(name, ['down', '--remove-orphans'], out);
+        // Nothing is deleted: the current folder goes to the trash.
+        const trash = path.join(stacksDir, '.trash');
+        fs.mkdirSync(trash, { recursive: true });
+        const dest = path.join(trash, `${name}-before-restore-${stamp()}`);
+        fs.renameSync(dir, dest);
+        out(t('log.movedToTrash', { path: dest }) + '\n');
+      }
+      out(`$ restic restore ${snap.shortId}\n`);
+      const r = await restic(['restore', `${snap.id}:${snap.paths[0]}`, '--target', dir], out);
+      if (r.code !== 0) throw new UserError('backup.resticFailed', { output: resticError(r) });
+
+      const dumps = path.join(dir, DUMPS);
+      let manifest = [];
+      try { manifest = JSON.parse(fs.readFileSync(path.join(dumps, 'manifest.json'), 'utf8')).dumps || []; } catch { /* no databases */ }
+      if (manifest.length) {
+        // Databases start empty (their files were not in the backup) and get the dump.
+        await stacks.prepare(name, out, t);
+        const cfg = await stacks.config(name);
+        const up = await stacks.compose(name, ['up', '-d', ...manifest.map((m) => m.service)], out);
+        if (up.code !== 0) throw new UserError('step.exitCode', { code: up.code });
+        for (const m of manifest) {
+          const container = containerName(name, m.service, cfg.services?.[m.service]);
+          await waitReady(container, m.kind, out, t);
+          out(t('backup.log.importing', { service: m.service }) + '\n');
+          const imp = await run('docker', ['exec', '-i', container, 'sh', '-c', restoreCommand(m.kind)], {
+            stdinFile: path.join(dumps, m.file), onStdout: out,
+          });
+          if (imp.code !== 0) throw new UserError('backup.importFailed', { service: m.service, output: imp.stderr.trim().slice(-800) });
+        }
+      }
+      fs.rmSync(dumps, { recursive: true, force: true });
+      await stacks.prepare(name, out, t);
+      const all = await stacks.compose(name, ['up', '-d', '--remove-orphans'], out);
+      if (all.code !== 0) throw new UserError('step.exitCode', { code: all.code });
+      out(t('backup.log.restored', { stack: name, time: snap.time.slice(0, 16).replace('T', ' ') }) + '\n');
+    };
+    try {
+      await (stacks.exists(name) ? stacks.exclusive(name, work) : work());
+      stacks.recordOperation(name, 'restore', true, output);
+    } catch (err) {
+      out(t('log.error', { message: err.key ? t(err.key, err.vars) : err.message }) + '\n');
+      stacks.recordOperation(name, 'restore', false, output);
+      throw err;
+    }
+  }
+
   /** Restores a snapshot into stack `target` (default: the stack it came from). */
   async function restore(snapshotId, target, t, extraLog) {
-    const match = (list) => list.find((s) => s.id === snapshotId || s.shortId === snapshotId);
-    const snap = match(await snapshots()) || match(await snapshots({ fresh: true }));
+    const snap = await findSnapshot(snapshotId);
     if (!snap || !snap.stack) throw new UserError('backup.noSnapshot', {}, 404);
     const name = target || snap.stack;
     stacks.assertName(name);
-
     return job('restore', name, t, async (log) => {
-      let output = '';
-      const out = (s) => { output += s; log(s); };
-      const work = async () => {
-        const dir = stacks.stackDir(name);
-        if (fs.existsSync(dir)) {
-          if (stacks.exists(name)) await stacks.compose(name, ['down', '--remove-orphans'], out);
-          // Nothing is deleted: the current folder goes to the trash.
-          const trash = path.join(stacksDir, '.trash');
-          fs.mkdirSync(trash, { recursive: true });
-          const dest = path.join(trash, `${name}-before-restore-${stamp()}`);
-          fs.renameSync(dir, dest);
-          out(t('log.movedToTrash', { path: dest }) + '\n');
-        }
-        out(`$ restic restore ${snap.shortId}\n`);
-        const r = await restic(['restore', `${snap.id}:${snap.paths[0]}`, '--target', dir], out);
-        if (r.code !== 0) throw new UserError('backup.resticFailed', { output: resticError(r) });
-
-        const dumps = path.join(dir, DUMPS);
-        let manifest = [];
-        try { manifest = JSON.parse(fs.readFileSync(path.join(dumps, 'manifest.json'), 'utf8')).dumps || []; } catch { /* no databases */ }
-        if (manifest.length) {
-          // Databases start empty (their files were not in the backup) and get the dump.
-          await stacks.prepare(name, out, t);
-          const cfg = await stacks.config(name);
-          const up = await stacks.compose(name, ['up', '-d', ...manifest.map((m) => m.service)], out);
-          if (up.code !== 0) throw new UserError('step.exitCode', { code: up.code });
-          for (const m of manifest) {
-            const container = containerName(name, m.service, cfg.services?.[m.service]);
-            await waitReady(container, m.kind, out, t);
-            out(t('backup.log.importing', { service: m.service }) + '\n');
-            const imp = await run('docker', ['exec', '-i', container, 'sh', '-c', restoreCommand(m.kind)], {
-              stdinFile: path.join(dumps, m.file), onStdout: out,
-            });
-            if (imp.code !== 0) throw new UserError('backup.importFailed', { service: m.service, output: imp.stderr.trim().slice(-800) });
-          }
-        }
-        fs.rmSync(dumps, { recursive: true, force: true });
-        await stacks.prepare(name, out, t);
-        const all = await stacks.compose(name, ['up', '-d', '--remove-orphans'], out);
-        if (all.code !== 0) throw new UserError('step.exitCode', { code: all.code });
-        out(t('backup.log.restored', { stack: name, time: snap.time.slice(0, 16).replace('T', ' ') }) + '\n');
-      };
-      try {
-        await (stacks.exists(name) ? stacks.exclusive(name, work) : work());
-        stacks.recordOperation(name, 'restore', true, output);
-      } catch (err) {
-        out(t('log.error', { message: err.key ? t(err.key, err.vars) : err.message }) + '\n');
-        stacks.recordOperation(name, 'restore', false, output);
-        throw err;
-      }
+      await restoreStack(snap, name, log, t);
       return { snapshot: snap.shortId };
     }, extraLog);
+  }
+
+  async function runs({ fresh = false } = {}) {
+    return groupRuns(await snapshots({ fresh }));
+  }
+
+  async function findRun(id) {
+    const match = (list) => list.find((r) => r.id === id);
+    return match(await runs()) || match(await runs({ fresh: true })) || null;
+  }
+
+  /** Restores every stack of one run (stacks only – the panel's settings stay as they are). */
+  async function restoreRun(runId, t) {
+    const r = await findRun(runId);
+    if (!r || !r.stacks.length) throw new UserError('backup.noSnapshot', {}, 404);
+    return job('restore-run', null, t, async (log) => {
+      const failed = [];
+      for (const snap of r.stacks) {
+        log(`\n— ${snap.stack} —\n`);
+        try { await restoreStack(snap, snap.stack, log, t); } catch { failed.push(snap.stack); }
+      }
+      return { failed, stacks: r.stacks.length };
+    });
+  }
+
+  // ---------- restoring a whole server (setup wizard) ----------
+
+  // Hooks set by server.js (domains are created after backups).
+  const hooks = {};
+  let serverRestore = null;
+
+  /** Copies the panel's settings from a restored database into the running one. */
+  function importPanelDb(file) {
+    const quoted = file.replace(/'/g, "''");
+    sqlite.exec(`ATTACH DATABASE '${quoted}' AS r`);
+    try {
+      const tables = (schema) => sqlite.prepare(`SELECT name FROM ${schema}.sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`).all().map((x) => x.name);
+      const theirs = new Set(tables('r'));
+      const columns = (schema, table) => sqlite.prepare(`PRAGMA ${schema}.table_info(${table})`).all().map((c) => c.name);
+      sqlite.transaction(() => {
+        sqlite.exec('DELETE FROM main.sessions');
+        for (const table of tables('main')) {
+          if (table === 'sessions' || !theirs.has(table)) continue;
+          const mine = columns('main', table);
+          const common = columns('r', table).filter((c) => mine.includes(c)).map((c) => `"${c}"`).join(', ');
+          sqlite.exec(`DELETE FROM main."${table}"`);
+          if (common) sqlite.exec(`INSERT INTO main."${table}" (${common}) SELECT ${common} FROM r."${table}"`);
+        }
+      })();
+    } finally {
+      sqlite.exec('DETACH DATABASE r');
+    }
+  }
+
+  /** The panel's own files: settings, encryption key, Caddy's folder (certificates). */
+  async function restoreSystem(snap, log, t) {
+    const tmp = path.join(dataDir, 'restore-system');
+    fs.rmSync(tmp, { recursive: true, force: true });
+    const staging = snap.paths.find((p) => p.endsWith('/backup-system'));
+    const own = snap.paths.find((p) => p.endsWith('/.stackmoor'));
+    if (!staging) throw new UserError('backup.noSnapshot', {}, 404);
+    log(`$ restic restore ${snap.shortId} (panel)\n`);
+    const r = await restic(['restore', `${snap.id}:${staging}`, '--target', tmp], log, { quiet: true });
+    if (r.code !== 0) throw new UserError('backup.resticFailed', { output: resticError(r) });
+
+    // Keep the connection that just worked (it may use another folder or key than the old one).
+    const keepConfig = config();
+    const keepSecrets = secrets();
+    try {
+      if (fs.existsSync(path.join(tmp, 'secret.key'))) {
+        fs.copyFileSync(path.join(tmp, 'secret.key'), path.join(dataDir, 'secret.key'));
+        fs.chmodSync(path.join(dataDir, 'secret.key'), 0o600);
+        initSecrets(dataDir);
+      }
+      importPanelDb(path.join(tmp, 'panel.db'));
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+    const restored = config();
+    const conn = ['destination', 'endpoint', 'region', 'bucket', 'prefix'];
+    setState(db, 'backup.config', { ...restored, ...Object.fromEntries(conn.map((k) => [k, keepConfig[k]])) });
+    setState(db, 'backup.secrets', encrypt(keepSecrets));
+    setState(db, 'backup.initialized', true);
+    log(t('backup.log.panelRestored') + '\n');
+
+    if (own) {
+      const dest = path.join(stacksDir, '.stackmoor');
+      if (fs.existsSync(dest)) {
+        const trash = path.join(stacksDir, '.trash');
+        fs.mkdirSync(trash, { recursive: true });
+        fs.renameSync(dest, path.join(trash, `.stackmoor-before-restore-${stamp()}`));
+      }
+      const c = await restic(['restore', `${snap.id}:${own}`, '--target', dest], log, { quiet: true });
+      if (c.code !== 0) log(resticError(c) + '\n');
+    }
+  }
+
+  /** Setup wizard: panel settings, then every stack of the run, then Caddy. */
+  async function restoreServer(runId, t) {
+    if (serverRestore && !serverRestore.done) throw new UserError('backup.busy', {}, 409);
+    const r = await findRun(runId);
+    if (!r || !r.system) throw new UserError('backup.noSnapshot', {}, 404);
+    serverRestore = { runId, time: r.time, total: r.stacks.length, current: 0, stack: null, phase: 'panel', done: false, failed: [], error: null };
+    const p = job('restore-server', null, t, async (log) => {
+      try {
+        await restoreSystem(r.system, log, t);
+        serverRestore.phase = 'stacks';
+        for (const snap of r.stacks) {
+          serverRestore.current += 1;
+          serverRestore.stack = snap.stack;
+          log(`\n— ${snap.stack} —\n`);
+          try { await restoreStack(snap, snap.stack, log, t); } catch { serverRestore.failed.push(snap.stack); }
+        }
+        serverRestore.phase = 'domains';
+        serverRestore.stack = null;
+        if (hooks.afterServerRestore) {
+          try { await hooks.afterServerRestore(log, t); } catch (err) { log((err.key ? t(err.key, err.vars) : err.message) + '\n'); }
+        }
+        serverRestore.phase = 'done';
+        return { failed: serverRestore.failed, stacks: r.stacks.length };
+      } catch (err) {
+        serverRestore.error = err.key ? t(err.key, err.vars) : err.message;
+        throw err;
+      } finally {
+        serverRestore.done = true;
+      }
+    });
+    p.catch(() => {});
+    return serverRestore;
+  }
+
+  /** For the wizard: connect to an existing repository (never creates one). */
+  async function connectExisting(body) {
+    const pick = ['destination', 'endpoint', 'region', 'bucket', 'prefix', 'accessKey', 'secretKey', 'password'];
+    saveConfig({ ...config(), ...Object.fromEntries(pick.map((k) => [k, body[k]])), enabled: false });
+    if (!configured()) throw new UserError('backup.incomplete');
+    const cat = await restic(['cat', 'config'], () => {}, { quiet: true });
+    if (cat.code !== 0) {
+      if (/wrong password|no key found/i.test(cat.stderr)) throw new UserError('backup.wrongPasswordRestore');
+      if (/does not exist|Is there a repository|unable to open config|NoSuchKey|key does not exist/i.test(cat.stderr)) throw new UserError('backup.noRepo');
+      throw new UserError('backup.repoError', { output: resticError(cat) });
+    }
+    setState(db, 'backup.initialized', true);
+    const list = await runs({ fresh: true });
+    return list.filter((x) => x.system).map((x) => ({ id: x.id, time: x.time, kind: x.kind, stacks: x.stacks.map((s) => s.stack), size: x.size }));
+  }
+
+  function serverRestoreStatus() {
+    if (!serverRestore) return null;
+    return { ...serverRestore, log: current?.kind === 'restore-server' ? current.log : lastLog };
   }
 
   // ---------- status and schedule ----------
@@ -574,8 +759,9 @@ export function createBackups({ db, stacks, stacksDir, dataDir, sqlite }) {
   }
 
   return {
-    publicConfig, saveConfig, revealPassword, test, status, snapshots, runAll, backupOne, restore,
-    verifyNow, startScheduler, busy: () => Boolean(current),
+    publicConfig, saveConfig, revealPassword, test, status, snapshots, runs, runAll, backupOne, restore,
+    restoreRun, restoreServer, serverRestoreStatus, connectExisting, verifyNow, startScheduler, hooks,
+    busy: () => Boolean(current),
   };
 }
 

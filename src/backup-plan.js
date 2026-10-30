@@ -132,8 +132,10 @@ export const containerName = (stack, svc, def = {}) => def.container_name || `${
 
 export function retentionArgs(cfg) {
   const n = (v, def) => Math.max(0, Math.min(1000, Number.isInteger(Number(v)) ? Number(v) : def));
+  // Grouped by path: every stack (and the panel's own files) keeps its own history,
+  // whatever run it was made in. Before-update snapshots are pruned separately (--tag).
   return [
-    '--group-by', 'tags',
+    '--group-by', 'paths',
     '--keep-last', '1',
     '--keep-daily', String(n(cfg.keepDaily, 7)),
     '--keep-weekly', String(n(cfg.keepWeekly, 4)),
@@ -172,4 +174,63 @@ export function isDue(cfg, lastRunDate, now = new Date()) {
   if (!cfg.days.includes(p.day) || lastRunDate === p.date) return false;
   const diff = minutes(p.time) - minutes(cfg.time);
   return diff >= 0 && diff < 60;
+}
+
+// ---------- runs ----------
+
+/** Id shared by all snapshots of one backup run, e.g. 20261030-030012-k3f9. */
+export function newRunId(date = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  const d = `${date.getUTCFullYear()}${p(date.getUTCMonth() + 1)}${p(date.getUTCDate())}`;
+  const t = `${p(date.getUTCHours())}${p(date.getUTCMinutes())}${p(date.getUTCSeconds())}`;
+  return `${d}-${t}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+const tagValue = (tags, prefix) => (tags || []).find((x) => x.startsWith(prefix))?.slice(prefix.length) || null;
+
+/**
+ * Groups snapshots into backup runs: one nightly run = the snapshots of all stacks plus the
+ * panel's own ("system") snapshot. Snapshots from 0.5 have no run tag – they are grouped by
+ * time: stack snapshots up to 3 hours before a system snapshot belong to its run.
+ */
+export function groupRuns(snapshots) {
+  const runs = new Map();
+  const add = (id, kind, snap, legacy = false) => {
+    if (!runs.has(id)) runs.set(id, { id, kind, legacy, time: snap.time, system: null, stacks: [], size: 0 });
+    const r = runs.get(id);
+    if (snap.time > r.time) r.time = snap.time;
+    if (snap.system) r.system = snap;
+    else {
+      r.stacks.push(snap);
+      r.size += snap.size || 0;
+    }
+  };
+
+  const legacy = [];
+  for (const s of snapshots) {
+    const run = tagValue(s.tags, 'run:');
+    if (run) add(run, tagValue(s.tags, 'kind:') || (s.preUpdate ? 'pre-update' : 'manual'), s);
+    else legacy.push(s);
+  }
+
+  // Older snapshots: pre-update ones are runs of their own; others cluster around system snapshots.
+  const WINDOW = 3 * 3600_000;
+  let pending = [];
+  const single = (s) => add(`legacy-${s.id}`, s.preUpdate ? 'pre-update' : 'manual', s, true);
+  for (const s of [...legacy].sort((a, b) => a.time.localeCompare(b.time))) {
+    if (s.preUpdate) { single(s); continue; }
+    if (!s.system) { pending.push(s); continue; }
+    const t = Date.parse(s.time);
+    const id = `legacy-${s.id}`;
+    for (const p of pending) {
+      if (t - Date.parse(p.time) <= WINDOW) add(id, 'scheduled', p, true);
+      else single(p);
+    }
+    add(id, 'scheduled', s, true);
+    pending = [];
+  }
+  pending.forEach(single);
+
+  for (const r of runs.values()) r.stacks.sort((a, b) => (a.stack || '').localeCompare(b.stack || ''));
+  return [...runs.values()].sort((a, b) => b.time.localeCompare(a.time));
 }

@@ -157,6 +157,13 @@ td code { font-size: 12.5px; }
 
 .auth { min-height: 100vh; display: grid; place-items: center; padding: 20px; }
 .auth .card { width: 100%; max-width: 380px; }
+.auth .card.wide { max-width: 620px; }
+.auth-or { text-align: center; margin: 14px 0 10px !important; }
+.run-pick { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 14px; }
+.run-option { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.progress { height: 6px; border-radius: 99px; background: var(--line); overflow: hidden; margin: 0 0 14px; }
+.progress span { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s ease; }
+.auth .terminal { margin-bottom: 14px; }
 .auth h1 { margin: 14px 0 4px; }
 .auth p { color: var(--muted); margin: 0 0 18px; font-size: 14px; }
 
@@ -224,3 +231,12 @@ details > summary { cursor: pointer; color: var(--muted); font-size: 14px; }
 }
 
 .card > p.hint { margin-bottom: 14px; }
+
+/* Backup runs */
+.runs { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.run { border: 1px solid var(--line); border-radius: 10px; padding: 4px 12px; }
+.run summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 8px 0; cursor: pointer; }
+.run-date { font-weight: 600; }
+.run-size { margin-left: auto; }
+.run table { margin: 4px 0 8px; }
+.run > .btn { margin: 0 0 10px; }

@@ -56,7 +56,7 @@ test('database folders inside the stack are left out, others are not', () => {
 
 test('retention arguments', () => {
   assert.deepEqual(retentionArgs({ keepDaily: 3, keepWeekly: 0, keepMonthly: 12 }),
-    ['--group-by', 'tags', '--keep-last', '1', '--keep-daily', '3', '--keep-weekly', '0', '--keep-monthly', '12']);
+    ['--group-by', 'paths', '--keep-last', '1', '--keep-daily', '3', '--keep-weekly', '0', '--keep-monthly', '12']);
 });
 
 test('schedule: chosen days and time, in the user\'s time zone, once a day', () => {
@@ -71,4 +71,42 @@ test('schedule: chosen days and time, in the user\'s time zone, once a day', () 
   assert.equal(isDue({ ...cfg, time: '01:00' }, null, now), false, 'more than an hour late');
   assert.equal(isDue({ ...cfg, enabled: false }, null, now), false);
   assert.equal(isDue({ ...cfg, timeZone: 'Not/AZone' }, null, now), false, 'bad zone falls back to UTC (02:10)');
+});
+
+test('runs: tagged snapshots are grouped by their run id', async () => {
+  const { groupRuns, newRunId } = await import('../src/backup-plan.js');
+  assert.match(newRunId(new Date('2026-10-30T03:00:12Z')), /^20261030-030012-[a-z0-9]{1,4}$/);
+  const snap = (id, time, tags, extra = {}) => ({ id, time, tags, system: tags.includes('system'), preUpdate: tags.includes('pre-update'), stack: (tags.find((t) => t.startsWith('stack:')) || '').slice(6) || null, size: 10, ...extra });
+  const runs = groupRuns([
+    snap('a', '2026-10-30T03:00:01Z', ['stack:wordpress', 'auto', 'run:R1', 'kind:scheduled']),
+    snap('b', '2026-10-30T03:00:05Z', ['stack:nginx', 'auto', 'run:R1', 'kind:scheduled']),
+    snap('c', '2026-10-30T03:00:09Z', ['system', 'auto', 'run:R1', 'kind:scheduled']),
+    snap('d', '2026-10-30T14:00:00Z', ['stack:nginx', 'pre-update', 'run:R2', 'kind:pre-update']),
+  ]);
+  assert.equal(runs.length, 2);
+  assert.equal(runs[0].id, 'R2');
+  assert.equal(runs[0].kind, 'pre-update');
+  assert.deepEqual(runs[1].stacks.map((s) => s.stack), ['nginx', 'wordpress']);
+  assert.equal(runs[1].system.id, 'c');
+  assert.equal(runs[1].size, 20);
+});
+
+test('runs: snapshots from 0.5 (no run tag) are grouped by time around system snapshots', async () => {
+  const { groupRuns } = await import('../src/backup-plan.js');
+  const snap = (id, time, tags) => ({ id, time, tags, system: tags.includes('system'), preUpdate: tags.includes('pre-update'), stack: (tags.find((t) => t.startsWith('stack:')) || '').slice(6) || null, size: 1 });
+  const runs = groupRuns([
+    snap('old', '2026-10-28T10:00:00Z', ['stack:wordpress']),                 // manual, long before
+    snap('w', '2026-10-29T03:00:01Z', ['stack:wordpress']),
+    snap('n', '2026-10-29T03:00:05Z', ['stack:nginx']),
+    snap('s', '2026-10-29T03:00:09Z', ['system']),
+    snap('p', '2026-10-29T12:00:00Z', ['stack:nginx', 'pre-update']),
+    snap('m', '2026-10-29T22:47:40Z', ['stack:wordpress']),                   // manual, no system after
+  ]);
+  const byId = Object.fromEntries(runs.map((r) => [r.id, r]));
+  assert.deepEqual(byId['legacy-s'].stacks.map((x) => x.id), ['n', 'w']);
+  assert.equal(byId['legacy-s'].kind, 'scheduled');
+  assert.equal(byId['legacy-old'].kind, 'manual');
+  assert.equal(byId['legacy-p'].kind, 'pre-update');
+  assert.equal(byId['legacy-m'].stacks.length, 1);
+  assert.equal(runs.length, 4);
 });

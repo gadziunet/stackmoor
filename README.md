@@ -6,7 +6,7 @@ A self-hosted web panel for Docker Compose stacks – in the spirit of Dockge, b
 
 **[Website](https://stackmoor.dev)** · **[Documentation](https://docs.stackmoor.dev)** · **[Releases](https://github.com/gadziunet/stackmoor/releases)** · [Polski](README.pl.md)
 
-> **Status:** v0.5 – stacks, automatic volumes, local domains, backups and restore work and are used on real servers. Next: restoring a whole server from a backup with a setup wizard. Still young software – keep your own backups too.
+> **Status:** v0.6 – stacks, automatic volumes, local domains, backups and restoring a whole server from a backup work and are used on real servers. Still young software – keep your own backups too.
 
 ## Install
 
@@ -74,7 +74,8 @@ docker exec stackmoor node src/cli.js unlock
 - **Before every update** the stack is backed up; if the backup fails, the update does not run.
 - **Checksums:** restic stores every piece of data under its SHA-256 checksum. Every run checks the repository, once a week 10% of the data is read back and compared, and *Verify everything* checks all of it.
 - **Retention:** daily, weekly and monthly backups to keep; older ones are removed automatically.
-- **Restore** from the stack's *Backups* tab: the current folder goes to the trash, the files come back, databases are loaded from their dumps and the stack starts. Restoring under a different name makes a copy.
+- **Restore** from the stack's *Backups* tab: the current folder goes to the trash, the files come back, databases are loaded from their dumps and the stack starts. Restoring under a different name makes a copy. Backups are listed per run, and *Restore all stacks* brings back every stack of a run.
+- **New server:** on a fresh install choose *Restore a server from a backup*, enter the bucket and the encryption password, pick a backup – the panel's settings, your account, domains and all stacks with their databases come back.
 
 > Keep the encryption password safe. Without it nobody can restore the backups.
 
@@ -83,8 +84,8 @@ docker exec stackmoor node src/cli.js unlock
 - [x] Stacks, editor, automatic volumes, logs
 - [x] Local domains through Caddy – wildcard certificate via your DNS provider's API (14 providers) or an internal CA
 - [x] Cloudron-style backups – per stack, automatically before updates, database dumps, schedule, retention, encryption; restic to S3 / Backblaze B2; restore and clone
+- [x] Setup wizard: fresh install or restore a whole server from a backup
 - [x] Updates: check for new Stackmoor versions and new stack images (on/off in Settings), show what is new and update only after confirmation
-- [ ] Setup wizard: fresh install or restore everything from a backup
 - [ ] Notifications (e-mail, ntfy, Pushover, webhooks)
 - [ ] Unraid Community Apps template
 

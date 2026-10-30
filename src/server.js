@@ -57,6 +57,12 @@ app.use(i18nMiddleware);
 
 // ---------- panel only through its domain ----------
 domains.attachSelf().catch(() => {}).then(() => domains.refreshCaddyIp()).catch(() => {});
+// After restoring a whole server: start Caddy with the restored domain settings.
+backups.hooks.afterServerRestore = async (log, t) => {
+  if (!getSettings(db).domain) return;
+  await domains.attachSelf().catch(() => {});
+  await domains.apply(log, t);
+};
 const panelLock = createPanelLock({ getSettings: () => getSettings(db), domains });
 setInterval(() => { if (panelLock.lockedHost()) domains.refreshCaddyIp().catch(() => {}); }, 60_000).unref();
 app.use(panelLock.middleware);
@@ -97,6 +103,7 @@ const errorText = (req, err) => (err instanceof UserError ? req.t(err.key, err.v
 app.get('/api/state', (req, res) => {
   res.json({
     needsSetup: !hasUsers(),
+    restoring: Boolean(backups.serverRestoreStatus() && !backups.serverRestoreStatus().done),
     user: req.user ? { username: req.user.username } : null,
     version: VERSION,
     ...(req.user ? { stacksDir: config.stacksDir, stacksDirOk: stacksDirOk } : {}),
@@ -127,6 +134,29 @@ app.post('/api/login', loginRateLimit, (req, res) => {
 app.post('/api/logout', (req, res) => {
   destroySession(db, req, res);
   res.json({ ok: true });
+});
+
+// ---------- setup wizard: restore a whole server from a backup ----------
+// Open only while the panel has no account yet; the status stays readable while a restore runs.
+
+const setupOnly = (req, res, next) => (hasUsers() ? fail(req, res, 409, 'setup.exists') : next());
+
+app.get('/api/setup/restore/options', setupOnly, (_req, res) => {
+  res.json({ destinations: backups.publicConfig().destinations });
+});
+
+app.post('/api/setup/restore/connect', loginRateLimit, setupOnly, wrap(async (req, res) => {
+  res.json({ runs: await backups.connectExisting(req.body || {}) });
+}));
+
+app.post('/api/setup/restore/start', setupOnly, wrap(async (req, res) => {
+  res.status(202).json(await backups.restoreServer(String(req.body?.run || ''), req.t));
+}));
+
+app.get('/api/setup/restore/status', (req, res) => {
+  const st = backups.serverRestoreStatus();
+  if (!st) return fail(req, res, 404, 'notFound');
+  res.json(st);
 });
 
 app.use('/api', requireAuth);
@@ -281,6 +311,16 @@ app.post('/api/stacks/:name/backup', (req, res) => {
   background(backups.backupOne(req.params.name, req.t));
   res.status(202).json({ ok: true });
 });
+
+app.get('/api/backups/runs', wrap(async (req, res) => {
+  res.json(await backups.runs({ fresh: req.query.fresh === '1' }));
+}));
+
+app.post('/api/backups/restore-run', wrap(async (req, res) => {
+  if (req.body?.confirm !== true) return fail(req, res, 400, 'delete.confirm');
+  background(backups.restoreRun(String(req.body.run || ''), req.t));
+  res.status(202).json({ ok: true });
+}));
 
 app.post('/api/backups/restore', wrap(async (req, res) => {
   const target = String(req.body?.target || '');

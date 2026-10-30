@@ -143,6 +143,8 @@ function bindLangSelect(id) {
 // ---------- login ----------
 
 function renderAuth() {
+  if (state.wizard === 'progress') return renderRestoreProgress();
+  if (state.wizard === 'restore' && state.needsSetup) return renderRestoreWizard();
   const setup = state.needsSetup;
   app.innerHTML = `
     <div class="auth"><form class="card" id="auth">
@@ -158,8 +160,11 @@ function renderAuth() {
         ${setup ? `<p class="hint">${t('auth.minLength')}</p>` : ''}</div>
       <div id="err"></div>
       <button class="btn primary" style="width:100%">${t(setup ? 'auth.create' : 'auth.submit')}</button>
+      ${setup ? `<p class="auth-or">${t('wiz.or')}</p>
+        <button type="button" class="btn" id="wiz-open" style="width:100%">${t('wiz.restoreBtn')}</button>` : ''}
     </form></div>`;
   bindLangSelect('auth-lang');
+  document.getElementById('wiz-open')?.addEventListener('click', () => { state.wizard = 'restore'; render(); });
   document.getElementById('auth').addEventListener('submit', async (e) => {
     e.preventDefault();
     const body = { username: document.getElementById('u').value, password: document.getElementById('p').value };
@@ -170,6 +175,171 @@ function renderAuth() {
       document.getElementById('err').innerHTML = errorBox(err);
     }
   });
+}
+
+// ---------- setup wizard: restore a whole server ----------
+
+async function renderRestoreWizard() {
+  let opts;
+  try {
+    opts = await api('GET', '/api/setup/restore/options');
+  } catch (err) {
+    state.wizard = null;
+    return render();
+  }
+  const dests = opts.destinations;
+  app.innerHTML = `
+    <div class="auth"><div class="card wide">
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <img src="/logo.svg" alt="Stackmoor" width="52" height="52">${langSelect('auth-lang')}
+      </div>
+      <h1>${t('wiz.title')}</h1>
+      <p>${t('wiz.lead')}</p>
+      <form id="wiz-form">
+        <div class="field"><label for="wz-dest">${t('bak.destination')}</label>
+          <select id="wz-dest" class="lang">${dests.map((d) => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join('')}</select></div>
+        <div class="row field">
+          <div style="flex:3;min-width:200px"><label for="wz-endpoint">${t('bak.endpoint')}</label>
+            <input type="text" id="wz-endpoint" autocapitalize="off" autocomplete="off" required></div>
+          <div style="flex:1;min-width:110px"><label for="wz-region">${t('bak.region')}</label>
+            <input type="text" id="wz-region" autocapitalize="off" autocomplete="off"></div>
+        </div>
+        <div class="row field">
+          <div style="flex:2;min-width:160px"><label for="wz-bucket">${t('bak.bucket')}</label>
+            <input type="text" id="wz-bucket" autocapitalize="off" autocomplete="off" required></div>
+          <div style="flex:1;min-width:110px"><label for="wz-prefix">${t('bak.prefix')}</label>
+            <input type="text" id="wz-prefix" value="stackmoor" autocapitalize="off" autocomplete="off"></div>
+        </div>
+        <div class="field"><label for="wz-ak">${t('bak.accessKey')}</label>
+          <input type="text" id="wz-ak" autocapitalize="off" autocomplete="off" required></div>
+        <div class="field"><label for="wz-sk">${t('bak.secretKey')}</label>
+          <input type="password" id="wz-sk" autocomplete="off" required></div>
+        <div class="field"><label for="wz-pw">${t('bak.password')}</label>
+          <input type="password" id="wz-pw" autocomplete="off" required></div>
+        <div id="wz-out"></div>
+        <div class="row">
+          <button class="btn primary" id="wz-connect">${t('wiz.connect')}</button>
+          <button type="button" class="btn" id="wz-back">${t('wiz.back')}</button>
+        </div>
+      </form>
+      <div id="wz-runs"></div>
+    </div></div>`;
+  bindLangSelect('auth-lang');
+  const fill = () => {
+    const d = dests.find((x) => x.id === document.getElementById('wz-dest').value);
+    const region = d?.region || '';
+    document.getElementById('wz-region').value = region;
+    document.getElementById('wz-endpoint').value = d?.endpoint && !d.endpoint.includes('<') ? d.endpoint.replace('{region}', region) : '';
+    document.getElementById('wz-endpoint').placeholder = (d?.endpoint || 'minio.example.com:9000').replace('{region}', region || 'region');
+  };
+  fill();
+  document.getElementById('wz-dest').addEventListener('change', fill);
+  document.getElementById('wz-region').addEventListener('input', (e) => {
+    const d = dests.find((x) => x.id === document.getElementById('wz-dest').value);
+    if (d?.endpoint && d.endpoint.includes('{region}') && !d.endpoint.includes('<')) {
+      document.getElementById('wz-endpoint').value = d.endpoint.replace('{region}', e.target.value.trim());
+    }
+  });
+  document.getElementById('wz-back').addEventListener('click', () => { state.wizard = null; render(); });
+
+  document.getElementById('wiz-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const out = document.getElementById('wz-out');
+    const btn = document.getElementById('wz-connect');
+    const val = (id) => document.getElementById(id).value.trim();
+    btn.disabled = true;
+    out.innerHTML = `<p class="hint">${t('wiz.connecting')}</p>`;
+    let runs;
+    try {
+      ({ runs } = await api('POST', '/api/setup/restore/connect', {
+        destination: val('wz-dest'), endpoint: val('wz-endpoint'), region: val('wz-region'), bucket: val('wz-bucket'),
+        prefix: val('wz-prefix'), accessKey: val('wz-ak'), secretKey: val('wz-sk'), password: document.getElementById('wz-pw').value,
+      }));
+    } catch (err) {
+      out.innerHTML = errorBox(err);
+      btn.disabled = false;
+      return;
+    }
+    out.innerHTML = '';
+    btn.disabled = false;
+    const box = document.getElementById('wz-runs');
+    if (!runs.length) {
+      box.innerHTML = `<div class="notice warn">${t('wiz.noRuns')}</div>`;
+      return;
+    }
+    box.innerHTML = `
+      <h2 style="margin-top:22px">${t('wiz.chooseRun')}</h2>
+      <form id="wz-pick">
+        <div class="run-pick">${runs.map((r, i) => `
+          <label class="check run-option"><input type="radio" name="run" value="${esc(r.id)}" ${i === 0 ? 'checked' : ''}>
+            <span><strong>${fmtDate(r.time)}</strong> · ${esc(t(`bak.kind.${r.kind}`))} · ${fmtBytes(r.size)}<br>
+            <span class="hint">${r.stacks.length ? esc(r.stacks.join(', ')) : t('wiz.noStacks')}</span></span></label>`).join('')}
+        </div>
+        <p class="hint">${t('wiz.startWarn')}</p>
+        <div id="wz-start-out"></div>
+        <button class="btn primary">${t('wiz.start')}</button>
+      </form>`;
+    box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    document.getElementById('wz-pick').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const run = document.querySelector('input[name="run"]:checked')?.value;
+      try {
+        await api('POST', '/api/setup/restore/start', { run });
+      } catch (err) {
+        document.getElementById('wz-start-out').innerHTML = errorBox(err);
+        return;
+      }
+      state.wizard = 'progress';
+      render();
+    });
+  });
+}
+
+function renderRestoreProgress() {
+  app.innerHTML = `
+    <div class="auth"><div class="card wide">
+      <img src="/logo.svg" alt="Stackmoor" width="52" height="52">
+      <h1 id="wz-title">${t('wiz.progress')}</h1>
+      <p id="wz-phase">${t('stack.loading')}</p>
+      <div class="progress" aria-hidden="true"><span id="wz-bar"></span></div>
+      <pre class="terminal" id="wz-log"></pre>
+      <div id="wz-done"></div>
+    </div></div>`;
+  const pre = document.getElementById('wz-log');
+  const tick = async () => {
+    if (state.wizard !== 'progress') return;
+    let st;
+    try {
+      st = await api('GET', '/api/setup/restore/status');
+    } catch {
+      return setTimeout(tick, 3000);
+    }
+    const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
+    pre.textContent = st.log || '';
+    if (atBottom) pre.scrollTop = pre.scrollHeight;
+    const phase = document.getElementById('wz-phase');
+    phase.textContent = st.phase === 'stacks'
+      ? t('wiz.phase.stacks', { i: st.current, n: st.total, name: st.stack || '' })
+      : t(`wiz.phase.${st.phase}`);
+    const parts = 2 + st.total;
+    const doneParts = st.phase === 'panel' ? 0 : st.phase === 'stacks' ? Math.max(0, st.current) : parts;
+    document.getElementById('wz-bar').style.width = `${Math.round((doneParts / parts) * 100)}%`;
+    if (!st.done) return setTimeout(tick, 2000);
+
+    document.getElementById('wz-title').textContent = t(st.error ? 'wiz.stopped' : 'wiz.finished');
+    const msg = st.error
+      ? `<div class="notice error">${esc(t('wiz.error', { error: st.error }))}</div>`
+      : st.failed.length
+        ? `<div class="notice warn">${esc(t('wiz.doneFailed', { list: st.failed.join(', ') }))}</div>`
+        : `<div class="notice info">${t('wiz.done')}</div>`;
+    document.getElementById('wz-done').innerHTML = `${msg}
+      <button class="btn primary" id="wz-login" style="width:100%">${t(st.error ? 'wiz.back' : 'wiz.login')}</button>`;
+    document.getElementById('wz-login').addEventListener('click', async () => {
+      state.wizard = null;
+      await boot();
+    });
+  };
+  tick();
 }
 
 // ---------- layout ----------
@@ -1166,6 +1336,97 @@ function snapshotsTable(box, list, { showStack, onRestored }) {
   });
 }
 
+/** Backup runs (one nightly run = all stacks + the panel's settings), newest first. */
+function runsTable(box, runs, onDone) {
+  if (!runs.length) {
+    box.innerHTML = `<p class="hint">${t('bak.noSnapshots')}</p>`;
+    return;
+  }
+  box.innerHTML = `
+    <div class="runs">${runs.map((r, i) => `
+      <details class="run" ${i === 0 ? 'open' : ''}>
+        <summary>
+          <span class="run-date">${fmtDate(r.time)}</span>
+          <span class="badge ${r.kind === 'pre-update' ? 'partial' : 'running'}">${esc(t(`bak.kind.${r.kind}`))}</span>
+          <span class="hint">${t('bak.runStacks', { n: r.stacks.length })}${r.system ? ` · ${t('bak.runSettings')}` : ''}</span>
+          <span class="hint run-size">${fmtBytes(r.size)}</span>
+        </summary>
+        <table><tbody>${r.stacks.map((sn) => `<tr>
+          <td>${esc(sn.stack)}</td><td class="hint">${fmtBytes(sn.size)}</td>
+          <td style="text-align:right"><button type="button" class="btn small" data-one="${esc(sn.id)}" data-stack="${esc(sn.stack)}">${t('bak.restore')}</button></td>
+        </tr>`).join('')}</tbody></table>
+        ${r.stacks.length > 1 ? `<button type="button" class="btn small" data-all="${esc(r.id)}">${t('bak.restoreAll')}</button>` : ''}
+      </details>`).join('')}
+    </div>
+    <form class="notice warn" id="rr-form" hidden>
+      <strong id="rr-title"></strong>
+      <p style="margin:6px 0" id="rr-lead"></p>
+      <div id="rr-one">
+        <div class="field"><label for="rr-target">${t('bak.restoreTarget')}</label>
+          <input type="text" id="rr-target" autocapitalize="off" autocomplete="off">
+          <p class="hint">${t('bak.restoreTargetHint')}</p></div>
+        <div class="field"><label for="rr-confirm">${t('bak.restoreConfirm')}</label>
+          <input type="text" id="rr-confirm" autocapitalize="off" autocomplete="off"></div>
+      </div>
+      <label class="check field" id="rr-all"><input type="checkbox" id="rr-all-ok"> ${t('bak.restoreAllConfirm')}</label>
+      <div id="rr-out"></div>
+      <div class="row"><button class="btn primary">${t('bak.restoreGo')}</button>
+        <button type="button" class="btn" id="rr-cancel">${t('bak.cancel')}</button></div>
+    </form>
+    <pre class="terminal" id="rr-log" hidden></pre>`;
+
+  const form = box.querySelector('#rr-form');
+  let mode = null;
+  let target = null;
+  const open = () => { form.hidden = false; form.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); };
+  box.querySelectorAll('[data-one]').forEach((b) => b.addEventListener('click', () => {
+    const run = runs.find((r) => r.stacks.some((x) => x.id === b.dataset.one));
+    mode = 'one';
+    target = b.dataset.one;
+    box.querySelector('#rr-title').textContent = t('bak.restoreTitle', { stack: b.dataset.stack, date: fmtDate(run.time) });
+    box.querySelector('#rr-lead').textContent = t('bak.restoreLead');
+    box.querySelector('#rr-one').hidden = false;
+    box.querySelector('#rr-all').hidden = true;
+    box.querySelector('#rr-target').value = b.dataset.stack;
+    box.querySelector('#rr-confirm').value = '';
+    open();
+    box.querySelector('#rr-confirm').focus();
+  }));
+  box.querySelectorAll('[data-all]').forEach((b) => b.addEventListener('click', () => {
+    const run = runs.find((r) => r.id === b.dataset.all);
+    mode = 'all';
+    target = run.id;
+    box.querySelector('#rr-title').textContent = t('bak.restoreAllTitle', { date: fmtDate(run.time) });
+    box.querySelector('#rr-lead').textContent = t('bak.restoreAllLead', { list: run.stacks.map((x) => x.stack).join(', ') });
+    box.querySelector('#rr-one').hidden = true;
+    box.querySelector('#rr-all').hidden = false;
+    box.querySelector('#rr-all-ok').checked = false;
+    open();
+  }));
+  box.querySelector('#rr-cancel').addEventListener('click', () => { form.hidden = true; });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      if (mode === 'one') {
+        const name = box.querySelector('#rr-target').value.trim();
+        await api('POST', '/api/backups/restore', { snapshot: target, target: name, confirm: box.querySelector('#rr-confirm').value.trim() });
+      } else {
+        await api('POST', '/api/backups/restore-run', { run: target, confirm: box.querySelector('#rr-all-ok').checked });
+      }
+    } catch (err) {
+      box.querySelector('#rr-out').innerHTML = errorBox(err);
+      return;
+    }
+    form.hidden = true;
+    box.querySelectorAll('[data-one],[data-all]').forEach((b) => (b.disabled = true));
+    watchBackupJob(box.querySelector('#rr-log'), (st) => {
+      toast(t(st.history?.[0]?.ok ? 'toast.done' : 'toast.failed'));
+      refreshStacks().catch(() => {});
+      setTimeout(onDone, 2500);
+    });
+  });
+}
+
 async function settingsBackups(body) {
   let d;
   try {
@@ -1348,8 +1609,8 @@ async function settingsBackups(body) {
   const snapsBox = document.getElementById('bk-snaps');
   const loadAll = async (fresh = false) => {
     if (fresh) snapsBox.innerHTML = `<p class="hint">${t('stack.loading')}</p>`;
-    const list = await api('GET', `/api/backups/snapshots${fresh ? '?fresh=1' : ''}`).catch((err) => { snapsBox.innerHTML = errorBox(err); return null; });
-    if (list && route().tab === 'backups') snapshotsTable(snapsBox, list.filter((x) => x.stack), { showStack: true });
+    const list = await api('GET', `/api/backups/runs${fresh ? '?fresh=1' : ''}`).catch((err) => { snapsBox.innerHTML = errorBox(err); return null; });
+    if (list && route().tab === 'backups') runsTable(snapsBox, list.filter((r) => r.stacks.length), () => loadAll());
   };
   if (snapsBox) {
     document.getElementById('bk-refresh').addEventListener('click', () => loadAll(true));
@@ -1426,6 +1687,7 @@ async function boot() {
   const s = await api('GET', '/api/state');
   state.user = s.user;
   state.needsSetup = s.needsSetup;
+  if (s.restoring) state.wizard = 'progress';
   state.version = !s.version ? '' : /^\d/.test(s.version) ? `v${s.version}` : s.version;
   state.stacksDir = s.stacksDir;
   state.stacksDirOk = s.stacksDirOk;

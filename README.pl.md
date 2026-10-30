@@ -6,7 +6,7 @@ Webowy panel do stacków Docker Compose na własnym serwerze – w duchu Dockge,
 
 **[Strona](https://stackmoor.dev)** · **[Dokumentacja](https://docs.stackmoor.dev/pl/)** · **[Wydania](https://github.com/gadziunet/stackmoor/releases)** · [English](README.md)
 
-> **Status:** v0.5 – stacki, automatyczne wolumeny, domeny lokalne, kopie zapasowe i przywracanie działają i są używane na prawdziwych serwerach. Następny krok: przywrócenie całego serwera z kopii przez kreator instalacji. To wciąż młode oprogramowanie – miej też własne kopie.
+> **Status:** v0.6 – stacki, automatyczne wolumeny, domeny lokalne, kopie zapasowe i przywracanie całego serwera z kopii działają i są używane na prawdziwych serwerach. To wciąż młode oprogramowanie – miej też własne kopie.
 
 ## Instalacja
 
@@ -83,7 +83,8 @@ docker exec stackmoor node src/cli.js unlock
 - **Przed każdą aktualizacją** robiona jest kopia stacka; jeśli się nie uda, aktualizacja się nie wykona.
 - **Sumy kontrolne:** restic zapisuje każdy kawałek danych pod jego sumą SHA-256. Każde uruchomienie sprawdza repozytorium, raz w tygodniu 10% danych jest pobierane i porównywane, a *Zweryfikuj wszystko* sprawdza całość.
 - **Rotacja:** ile kopii dziennych, tygodniowych i miesięcznych trzymać; starsze są usuwane automatycznie.
-- **Przywracanie** z zakładki *Kopie* w stacku: obecny folder trafia do kosza, pliki wracają, bazy są wczytywane ze zrzutów, a stack się uruchamia. Przywrócenie pod inną nazwą tworzy kopię.
+- **Przywracanie** z zakładki *Kopie* w stacku: obecny folder trafia do kosza, pliki wracają, bazy są wczytywane ze zrzutów, a stack się uruchamia. Przywrócenie pod inną nazwą tworzy kopię. Kopie są pogrupowane po uruchomieniu, a *Przywróć wszystkie stacki* odtwarza wszystkie stacki z danego uruchomienia.
+- **Nowy serwer:** na świeżej instalacji wybierz *Przywróć serwer z kopii zapasowej*, podaj bucket i hasło szyfrowania, wybierz kopię – wracają ustawienia panelu, Twoje konto, domeny i wszystkie stacki razem z bazami.
 
 > Przechowuj hasło szyfrowania w bezpiecznym miejscu. Bez niego nikt nie przywróci kopii.
 
@@ -92,8 +93,8 @@ docker exec stackmoor node src/cli.js unlock
 - [x] Stacki, edytor, automatyczne wolumeny, logi
 - [x] Domeny lokalne przez Caddy – certyfikat wildcard przez API dostawcy DNS (14 dostawców) albo wewnętrzny CA
 - [x] Backupy jak w Cloudronie – per stack, automatycznie przed aktualizacją, dumpy baz, harmonogram, retencja, szyfrowanie; restic do S3 / Backblaze B2; przywracanie i klonowanie
+- [x] Kreator: nowa instalacja albo przywrócenie całego serwera z kopii
 - [x] Aktualizacje: sprawdzanie nowych wersji Stackmoor i nowych obrazów stacków (włączane w Ustawieniach), pokazanie co nowego i aktualizacja dopiero po potwierdzeniu
-- [ ] Kreator: nowa instalacja albo przywrócenie wszystkiego z backupu
 - [ ] Powiadomienia (e-mail, ntfy, Pushover, webhooki)
 - [ ] Szablon Unraid w Community Apps
 
