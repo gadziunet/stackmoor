@@ -811,6 +811,7 @@ async function renderStack(name) {
     if (currentTab === 'logs' && k !== 'logs') stopStream();
     currentTab = k;
     main.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === k));
+    revealActiveTab(main.querySelector('.tabs'), true);
     tabs[k]();
   };
   main.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
@@ -864,6 +865,15 @@ async function renderStack(name) {
   if (autostart) runAction('up');
 }
 
+// Scroll a tab bar sideways so its active tab is centred (only the bar moves, never the page).
+function revealActiveTab(nav, smooth = false) {
+  const on = nav?.querySelector('.on');
+  if (!on) return;
+  const left = nav.scrollLeft + on.getBoundingClientRect().left - nav.getBoundingClientRect().left
+    - (nav.clientWidth - on.offsetWidth) / 2;
+  nav.scrollTo({ left: Math.max(0, left), behavior: smooth ? 'smooth' : 'auto' });
+}
+
 const SETTINGS_TABS = ['general', 'domains', 'updates', 'backups', 'account'];
 
 async function renderSettings(tab = 'general') {
@@ -875,6 +885,7 @@ async function renderSettings(tab = 'general') {
       ${SETTINGS_TABS.map((k) => `<a href="#/settings/${k}" class="${k === tab ? 'on' : ''}"${k === tab ? ' aria-current="page"' : ''}>${t(`set.tab.${k}`)}</a>`).join('')}
     </nav>
     <div id="set-body"><p class="hint">${t('stack.loading')}</p></div>`;
+  revealActiveTab(main.querySelector('.tabs'));
   const body = document.getElementById('set-body');
   const s = await api('GET', '/api/settings');
   if (route().page !== 'settings') return;

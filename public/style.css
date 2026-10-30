@@ -109,15 +109,22 @@ textarea.env { min-height: 120px; }
 .check { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; color: var(--text); }
 .check input { margin-top: 4px; }
 
-.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 16px; overflow-x: auto; }
+/* Tabs scroll sideways only: the bottom line is an inset shadow (not a border the
+   tabs overlap), so nothing sticks out vertically and the bar never scrolls up/down. */
+.tabs {
+  display: flex; gap: 4px; margin-bottom: 16px; box-shadow: inset 0 -1px 0 var(--line);
+  overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
+  scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+.tabs::-webkit-scrollbar { display: none; }
 .tabs button {
   border: 0; background: none; padding: 8px 12px; cursor: pointer; color: var(--muted);
-  border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap;
+  border-bottom: 2px solid transparent; white-space: nowrap; flex: none;
 }
 .tabs button.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
 .tabs a {
   padding: 8px 12px; color: var(--muted); text-decoration: none; white-space: nowrap;
-  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  border-bottom: 2px solid transparent; flex: none;
 }
 .tabs a.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
 
