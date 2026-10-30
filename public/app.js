@@ -792,6 +792,17 @@ function settingsUpdates(body, s) {
         : `<p class="hint">${u.lastRun ? t('upd.stacksNone') : t('upd.never')}</p>`}
     </div>
 
+    ${u.caddy ? `<div class="card">
+      <h2>${t('upd.caddyTitle')}</h2>
+      <p class="hint" style="margin-top:-4px">${t('upd.caddyLead')}</p>
+      ${u.caddy.updateAvailable
+        ? `<div class="notice info"><strong>${t('upd.caddyNew')}</strong>
+            <p class="hint" style="margin:6px 0 10px">${t('upd.caddyHow')}</p>
+            <button type="button" class="btn primary" id="caddy-upd">${t('upd.caddyApply')}</button></div>`
+        : `<p class="hint">${u.caddy.updateAvailable === false ? t('upd.caddyOk') : t('upd.caddyUnknown')}</p>`}
+      <pre class="terminal" id="caddy-term" hidden></pre>
+    </div>` : ''}
+
     <form class="card" id="upd-form">
       <h2>${t('upd.settingsTitle')}</h2>
       <label class="check field"><input type="checkbox" id="upd-on" ${s.updateCheck ? 'checked' : ''}>
@@ -807,6 +818,27 @@ function settingsUpdates(body, s) {
       <div id="upd-form-out"></div>
       <button class="btn primary">${t('set.save')}</button>
     </form>`;
+
+  document.getElementById('caddy-upd')?.addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    const pre = document.getElementById('caddy-term');
+    pre.hidden = false;
+    pre.textContent = '';
+    const code = await stream('POST', '/api/domains/update-caddy', (txt) => appendTo(pre, txt)).catch((err) => {
+      appendTo(pre, `\n${err.message}\n`);
+      return 1;
+    });
+    toast(t(code === 0 ? 'toast.done' : 'toast.failed'));
+    if (code === 0) {
+      setTimeout(async () => {
+        state.updates = await api('GET', '/api/updates').catch(() => state.updates);
+        renderUpdateBadge();
+        if (route().tab === 'updates') settingsUpdates(body, s);
+      }, 3000);
+    } else {
+      e.target.disabled = false;
+    }
+  });
 
   document.getElementById('upd-check').addEventListener('click', async (e) => {
     e.target.disabled = true;
@@ -1361,8 +1393,11 @@ function renderUpdateBadge() {
   const el = document.getElementById('panel-update');
   if (!el) return;
   const p = state.updates?.panel;
-  el.hidden = !p?.updateAvailable;
-  el.textContent = p?.buildUpdate ? t('upd.badgeBuild') : t('upd.badge', { version: showVersion(p?.latest) });
+  const caddy = state.updates?.caddy?.updateAvailable;
+  el.hidden = !p?.updateAvailable && !caddy;
+  el.textContent = p?.updateAvailable
+    ? (p.buildUpdate ? t('upd.badgeBuild') : t('upd.badge', { version: showVersion(p.latest) }))
+    : t('upd.badgeBuild');
 }
 
 // ---------- start ----------

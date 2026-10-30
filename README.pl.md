@@ -2,11 +2,11 @@
 
 # Stackmoor
 
-Prosty webowy panel do stacków Docker Compose – w duchu Dockge, ale bez myślenia o ścieżkach wolumenów. Każdy stack trzyma dane we własnym folderze, gotowym do backupu.
+Webowy panel do stacków Docker Compose na własnym serwerze – w duchu Dockge, ale bez myślenia o ścieżkach wolumenów. Każdy stack trzyma dane we własnym folderze, kopie zapasowe obejmują zrzuty baz danych, a każda aplikacja może dostać domenę lokalną z prawdziwym certyfikatem HTTPS.
 
-[English](README.md)
+**[Strona](https://stackmoor.dev)** · **[Dokumentacja](https://docs.stackmoor.dev/pl/)** · **[Wydania](https://github.com/gadziunet/stackmoor/releases)** · [English](README.md)
 
-> **Status:** wczesna wersja (v0.1). Zarządzanie stackami działa; backupy, domeny lokalne i kreator instalacji są w planie.
+> **Status:** v0.5 – stacki, automatyczne wolumeny, domeny lokalne, kopie zapasowe i przywracanie działają i są używane na prawdziwych serwerach. Następny krok: przywrócenie całego serwera z kopii przez kreator instalacji. To wciąż młode oprogramowanie – miej też własne kopie.
 
 ## Instalacja
 
@@ -92,8 +92,10 @@ docker exec stackmoor node src/cli.js unlock
 - [x] Stacki, edytor, automatyczne wolumeny, logi
 - [x] Domeny lokalne przez Caddy – certyfikat wildcard przez API dostawcy DNS (14 dostawców) albo wewnętrzny CA
 - [x] Backupy jak w Cloudronie – per stack, automatycznie przed aktualizacją, dumpy baz, harmonogram, retencja, szyfrowanie; restic do S3 / Backblaze B2; przywracanie i klonowanie
-- [ ] Kreator: nowa instalacja albo przywrócenie wszystkiego z backupu
 - [x] Aktualizacje: sprawdzanie nowych wersji Stackmoor i nowych obrazów stacków (włączane w Ustawieniach), pokazanie co nowego i aktualizacja dopiero po potwierdzeniu
+- [ ] Kreator: nowa instalacja albo przywrócenie wszystkiego z backupu
+- [ ] Powiadomienia (e-mail, ntfy, Pushover, webhooki)
+- [ ] Szablon Unraid w Community Apps
 
 ## Rozwój
 

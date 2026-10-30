@@ -397,6 +397,19 @@ export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings
     return caddyIp;
   }
 
+  /** Pulls the newest Caddy image and recreates the container (certificates are kept in ./data). */
+  async function updateCaddy(log, t) {
+    if (!getSettings().domain || !fs.existsSync(path.join(caddyDir, 'compose.yaml'))) throw new UserError('dns.noDomain');
+    log(`$ docker compose -p ${CADDY} pull\n`);
+    const pull = await docker([...composeArgs(), 'pull'], { onData: log });
+    if (pull.code !== 0) throw new UserError('step.exitCode', { code: pull.code });
+    log(`$ docker compose -p ${CADDY} up -d\n`);
+    const up = await docker([...composeArgs(), 'up', '-d', '--remove-orphans'], { onData: log });
+    if (up.code !== 0) throw new UserError('step.exitCode', { code: up.code });
+    await refreshCaddyIp();
+    log(t('dns.log.caddyUpdated') + '\n');
+  }
+
   /** Is Caddy running, is there a certificate, and the latest certificate errors. */
   async function status() {
     const s = getSettings();
@@ -416,6 +429,6 @@ export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings
 
   return {
     publicConfig, saveConfig, routes, setRoutes, removeStack, writeOverride, apply, status, buildConfig,
-    panelUrl, refreshCaddyIp, attachSelf, savePanel, reloadConfig, caddyIp: () => caddyIp,
+    panelUrl, refreshCaddyIp, attachSelf, savePanel, reloadConfig, updateCaddy, caddyIp: () => caddyIp,
   };
 }

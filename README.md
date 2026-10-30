@@ -2,11 +2,11 @@
 
 # Stackmoor
 
-A simple web UI for Docker Compose stacks – in the spirit of Dockge, but you never have to think about volume paths. Every stack keeps its data in its own folder, ready for backups.
+A self-hosted web panel for Docker Compose stacks – in the spirit of Dockge, but you never have to think about volume paths. Every stack keeps its data in its own folder, backups include database dumps, and every app can get a local domain with a real HTTPS certificate.
 
-[Polski](README.pl.md)
+**[Website](https://stackmoor.dev)** · **[Documentation](https://docs.stackmoor.dev)** · **[Releases](https://github.com/gadziunet/stackmoor/releases)** · [Polski](README.pl.md)
 
-> **Status:** early development (v0.1). Works for managing stacks; backups, local domains and the setup wizard are on the roadmap.
+> **Status:** v0.5 – stacks, automatic volumes, local domains, backups and restore work and are used on real servers. Next: restoring a whole server from a backup with a setup wizard. Still young software – keep your own backups too.
 
 ## Install
 
@@ -83,8 +83,10 @@ docker exec stackmoor node src/cli.js unlock
 - [x] Stacks, editor, automatic volumes, logs
 - [x] Local domains through Caddy – wildcard certificate via your DNS provider's API (14 providers) or an internal CA
 - [x] Cloudron-style backups – per stack, automatically before updates, database dumps, schedule, retention, encryption; restic to S3 / Backblaze B2; restore and clone
-- [ ] Setup wizard: fresh install or restore everything from a backup
 - [x] Updates: check for new Stackmoor versions and new stack images (on/off in Settings), show what is new and update only after confirmation
+- [ ] Setup wizard: fresh install or restore everything from a backup
+- [ ] Notifications (e-mail, ntfy, Pushover, webhooks)
+- [ ] Unraid Community Apps template
 
 ## Development
 

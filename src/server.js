@@ -306,6 +306,18 @@ app.put('/api/domains/panel', wrap(async (req, res) => {
   res.json(domains.publicConfig());
 }));
 
+app.post('/api/domains/update-caddy', wrap(async (req, res) => {
+  const write = openStream(res);
+  let ok = true;
+  await domains.updateCaddy(write, req.t).catch((err) => {
+    ok = false;
+    write(`\n${req.t('log.error', { message: errorText(req, err) })}\n`);
+  });
+  write(`\n__EXIT__:${ok ? 0 : 1}\n`);
+  res.end();
+  updates.checkCaddy().catch(() => {});
+}));
+
 app.post('/api/domains/apply', wrap(async (req, res) => {
   const write = openStream(res);
   let ok = true;

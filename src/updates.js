@@ -128,6 +128,21 @@ export function createUpdates({ db, stacks, getSettings }) {
     return all;
   }
 
+  // ---------- Caddy (local domains) ----------
+
+  /** The image of the running Caddy container, compared with its registry. null = no Caddy. */
+  async function checkCaddy() {
+    const r = await docker(['inspect', '--format', '{{.Config.Image}}', 'stackmoor-caddy']);
+    if (r.code !== 0) {
+      setState(db, 'update.caddy', null);
+      return null;
+    }
+    const image = r.stdout.trim();
+    const result = { checkedAt: new Date().toISOString(), image, updateAvailable: await imageHasUpdate(image).catch(() => null) };
+    setState(db, 'update.caddy', result);
+    return result;
+  }
+
   // ---------- running checks ----------
 
   async function checkAll() {
@@ -137,6 +152,7 @@ export function createUpdates({ db, stacks, getSettings }) {
       try {
         await checkPanel();
         if (settings.updateCheckStacks) await checkStacks();
+        await checkCaddy().catch(() => {});
         setState(db, 'update.lastRun', new Date().toISOString());
       } finally {
         running = null;
@@ -164,6 +180,7 @@ export function createUpdates({ db, stacks, getSettings }) {
       panel,
       stacks: stacksState,
       stacksWithUpdates,
+      caddy: getState(db, 'update.caddy'),
     };
   }
 
@@ -203,5 +220,5 @@ export function createUpdates({ db, stacks, getSettings }) {
     return { started: true };
   }
 
-  return { checkAll, checkStack, checkPanel, status, startScheduler, selfInfo, updatePanel };
+  return { checkAll, checkStack, checkPanel, checkCaddy, status, startScheduler, selfInfo, updatePanel };
 }
