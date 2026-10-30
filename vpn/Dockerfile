@@ -3,6 +3,11 @@
 # through the tunnel. A kill switch (written by the panel) blocks everything else.
 FROM alpine:3.20
 RUN apk add --no-cache bash iproute2 iptables ip6tables wireguard-tools
+# In a container /proc/sys is read-only: wg-quick must not try to set src_valid_mark when
+# Docker already did (compose "sysctls"). Same fix as in linuxserver/wireguard. The grep
+# makes the build fail if a future wg-quick changes this line.
+RUN sed -i 's/cmd sysctl -q net\.ipv4\.conf\.all\.src_valid_mark=1/{ [[ $(sysctl -n net.ipv4.conf.all.src_valid_mark) == 1 ]] || cmd sysctl -q net.ipv4.conf.all.src_valid_mark=1; }/' /usr/bin/wg-quick \
+ && grep -q 'sysctl -n net.ipv4.conf.all.src_valid_mark' /usr/bin/wg-quick
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 

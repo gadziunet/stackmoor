@@ -126,7 +126,13 @@ export function killSwitchScript({ endpoints, allowedIps, full }) {
     lines.push('# Split tunnel: these networks only through wg0');
     for (const c of ipv4) lines.push(`iptables -A OUTPUT -d ${sh(c)} -j REJECT`);
   }
-  lines.push('ip6tables -P OUTPUT DROP 2>/dev/null || true', 'ip6tables -A OUTPUT -o lo -j ACCEPT 2>/dev/null || true');
+  // IPv6: only through the tunnel (if the config has IPv6), never directly.
+  lines.push(
+    'ip6tables -F OUTPUT 2>/dev/null || true',
+    'ip6tables -A OUTPUT -o lo -j ACCEPT 2>/dev/null || true',
+    'ip6tables -A OUTPUT -o wg0 -j ACCEPT 2>/dev/null || true',
+    'ip6tables -P OUTPUT DROP 2>/dev/null || true',
+  );
   return `${lines.join('\n')}\n`;
 }
 
