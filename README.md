@@ -79,6 +79,15 @@ docker exec stackmoor node src/cli.js unlock
 
 > Keep the encryption password safe. Without it nobody can restore the backups.
 
+## Connect through VPN
+
+Send chosen apps through your **WireGuard** tunnel – like a second internet connection only for them. Typical use: a web SSH client (e.g. Termix) on your home server reaching VPSes whose firewall only allows the tunnel's fixed address.
+
+1. **Settings → VPN:** add a tunnel – paste your `.conf` file.
+2. **Stack → VPN:** choose the tunnel and the services that should use it.
+
+What goes through the tunnel follows `AllowedIPs` in your file. **Kill switch is always on:** if the tunnel is down, those apps have no internet at all and the panel shows a warning. Details: [docs.stackmoor.dev/guides/vpn](https://docs.stackmoor.dev/guides/vpn/).
+
 ## Roadmap
 
 - [x] Stacks, editor, automatic volumes, logs
@@ -87,7 +96,7 @@ docker exec stackmoor node src/cli.js unlock
 - [x] Setup wizard: fresh install or restore a whole server from a backup
 - [x] Updates: check for new Stackmoor versions and new stack images (on/off in Settings), show what is new and update only after confirmation
 - [x] Setup wizard: start with the IP address or set up the domain right away; the DNS record is added through the provider's API and the domain is checked first
-- [ ] VPN (WireGuard) for chosen stacks – e.g. reach your servers from a fixed address
+- [x] Connect through VPN (WireGuard) for chosen services – e.g. reach your servers from a fixed address; kill switch always on
 - [ ] Notifications (e-mail, Telegram, ntfy, Pushover, webhooks)
 - [ ] Unraid Community Apps template
 

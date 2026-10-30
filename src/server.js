@@ -18,6 +18,7 @@ import { initSecrets } from './secrets.js';
 import { createDomains } from './domains.js';
 import { createPanelLock } from './panel-lock.js';
 import { createBackups } from './backups.js';
+import { createVpn } from './vpn.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -50,6 +51,11 @@ const domains = createDomains({
   getSettings: () => getSettings(db),
   saveSettings: (patch) => saveSettings(db, patch),
 });
+const vpn = createVpn({ db, stacks, stacksDir: config.stacksDir, domains });
+domains.vpn.servicesFor = vpn.servicesFor;
+stacks.hooks.beforeUp = vpn.beforeUp;
+stacks.hooks.afterUp = vpn.afterUp;
+vpn.syncImages().catch(() => {}).finally(() => vpn.startMonitor());
 
 // Changes with every start – the page uses it to notice that the panel restarted.
 const BOOT_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -68,6 +74,7 @@ domains.attachSelf().catch(() => {})
 setInterval(() => { domains.syncImage().catch(() => {}); }, 6 * 3600_000).unref();
 // After restoring a whole server: start Caddy with the restored domain settings.
 backups.hooks.afterServerRestore = async (log, t) => {
+  await vpn.startAll(log, t);
   if (!getSettings(db).domain) return;
   await domains.attachSelf().catch(() => {});
   await domains.apply(log, t);
@@ -222,7 +229,7 @@ app.put('/api/settings', (req, res) => {
 
 app.get('/api/stacks', wrap(async (_req, res) => {
   const withUpdates = new Set(updates.status().stacksWithUpdates);
-  res.json((await stacks.list()).map((s) => ({ ...s, updateAvailable: withUpdates.has(s.name) })));
+  res.json((await stacks.list()).map((s) => ({ ...s, updateAvailable: withUpdates.has(s.name), vpn: vpn.stackState(s.name) })));
 }));
 
 app.post('/api/stacks', wrap(async (req, res) => {
@@ -279,12 +286,54 @@ app.delete('/api/stacks/:name', wrap(async (req, res) => {
   if (req.body?.confirm !== req.params.name) return fail(req, res, 400, 'delete.confirm');
   const lines = [];
   await stacks.remove(req.params.name, (s) => lines.push(s), req.t);
+  await vpn.forgetStack(req.params.name).catch(() => {});
   if (domains.routes(req.params.name).length) {
     domains.removeStack(req.params.name);
     if (getSettings(db).domain) await domains.apply(() => {}, req.t).catch(() => {});
   }
   res.json({ ok: true, output: lines.join('') });
 }));
+
+// ---------- VPN ----------
+
+const streamJob = (fn) => wrap(async (req, res) => {
+  const write = openStream(res);
+  let ok = true;
+  await fn(req, write).catch((err) => {
+    ok = false;
+    write(`\n${req.t('log.error', { message: errorText(req, err) })}\n`);
+  });
+  write(`\n__EXIT__:${ok ? 0 : 1}\n`);
+  res.end();
+});
+
+app.get('/api/vpn', wrap(async (_req, res) => {
+  await vpn.checkAll();
+  res.json({ tunnels: vpn.list(), image: vpn.image });
+}));
+app.post('/api/vpn', streamJob((req, write) => vpn.add(req.body || {}, write, req.t)));
+app.put('/api/vpn/:name', streamJob((req, write) => vpn.replaceConf(req.params.name, req.body?.conf, write, req.t)));
+app.post('/api/vpn/:name/restart', streamJob((req, write) => vpn.restart(req.params.name, write, req.t)));
+app.delete('/api/vpn/:name', wrap(async (req, res) => {
+  await vpn.remove(req.params.name);
+  res.json({ ok: true });
+}));
+
+app.get('/api/stacks/:name/vpn', wrap(async (req, res) => {
+  stacks.assertName(req.params.name);
+  const cfg = await stacks.config(req.params.name, { raw: true });
+  const services = Object.entries(cfg.services || {}).map(([name, def]) => ({
+    name,
+    ports: (def.ports || []).filter((p) => p.published).map((p) => `${p.published}:${p.target}`),
+    hostNetwork: Boolean(def.network_mode && !String(def.network_mode).startsWith('container:stackmoor-vpn-')),
+  }));
+  res.json({
+    tunnels: vpn.list().map((x) => ({ name: x.name, state: x.status?.state || 'unknown', full: x.full })),
+    attach: vpn.stackState(req.params.name),
+    services,
+  });
+}));
+app.put('/api/stacks/:name/vpn', streamJob((req, write) => vpn.setStack(req.params.name, req.body || {}, write, req.t)));
 
 // ---------- backups ----------
 

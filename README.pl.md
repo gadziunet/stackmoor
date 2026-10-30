@@ -88,6 +88,15 @@ docker exec stackmoor node src/cli.js unlock
 
 > Przechowuj hasło szyfrowania w bezpiecznym miejscu. Bez niego nikt nie przywróci kopii.
 
+## Łącz przez VPN
+
+Wybrane aplikacje wysyłają ruch Twoim tunelem **WireGuard** – jak drugie łącze tylko dla nich. Typowy przypadek: webowy klient SSH (np. Termix) na domowym serwerze łączy się z VPS-ami, których firewall wpuszcza tylko stały adres tunelu.
+
+1. **Ustawienia → VPN:** dodaj tunel – wklej swój plik `.conf`.
+2. **Stack → VPN:** wybierz tunel i usługi, które mają z niego korzystać.
+
+To, co idzie tunelem, wynika z `AllowedIPs` w Twoim pliku. **Blokada (kill switch) jest zawsze włączona:** gdy tunel nie działa, te aplikacje nie mają w ogóle internetu, a panel pokazuje ostrzeżenie. Szczegóły: [docs.stackmoor.dev/pl/guides/vpn](https://docs.stackmoor.dev/pl/guides/vpn/).
+
 ## Plan
 
 - [x] Stacki, edytor, automatyczne wolumeny, logi
@@ -96,7 +105,7 @@ docker exec stackmoor node src/cli.js unlock
 - [x] Kreator: nowa instalacja albo przywrócenie całego serwera z kopii
 - [x] Aktualizacje: sprawdzanie nowych wersji Stackmoor i nowych obrazów stacków (włączane w Ustawieniach), pokazanie co nowego i aktualizacja dopiero po potwierdzeniu
 - [x] Kreator: start po adresie IP albo od razu z domeną; rekord DNS dodaje się przez API dostawcy, a domena jest najpierw sprawdzana
-- [ ] VPN (WireGuard) dla wybranych stacków – np. łączenie z serwerami ze stałego adresu
+- [x] Łącz przez VPN (WireGuard) dla wybranych usług – np. łączenie z serwerami ze stałego adresu; blokada (kill switch) zawsze włączona
 - [ ] Powiadomienia (e-mail, Telegram, ntfy, Pushover, webhooki)
 - [ ] Szablon Unraid w Community Apps
 

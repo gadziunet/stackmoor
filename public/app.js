@@ -52,8 +52,12 @@ async function api(method, url, body) {
 }
 
 // Reads a streamed response and passes text through as it arrives. Returns the exit code (if any).
-async function stream(method, url, onText, signal) {
-  const res = await fetch(url, { method, headers: headers(false), signal });
+async function stream(method, url, onText, signal, body) {
+  const res = await fetch(url, {
+    method, signal,
+    headers: body === undefined ? headers(false) : headers(true),
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data.error || `HTTP ${res.status}`);
@@ -477,13 +481,23 @@ function renderShell() {
   }
   renderStackList();
   renderUpdateBadge();
+  renderGlobalWarning();
+}
+
+function renderGlobalWarning() {
   const warn = document.getElementById('global-warning');
-  if (warn) {
-    warn.innerHTML = (state.stacksDirOk === false
-      ? `<div class="notice error global">${t('warn.stacksDir', { dir: esc(state.stacksDir) })}</div>`
-      : '')
-      + (state.updating ? `<div class="notice info global">${t('upd.restarting')}</div>` : '');
+  if (!warn) return;
+  // Tunnels that are down – the apps behind them have no internet (kill switch).
+  const down = {};
+  for (const s of state.stacks || []) {
+    if (s.vpn && !s.vpn.ok) (down[s.vpn.tunnel] ||= []).push(s.name);
   }
+  warn.innerHTML = (state.stacksDirOk === false
+    ? `<div class="notice error global">${t('warn.stacksDir', { dir: esc(state.stacksDir) })}</div>`
+    : '')
+    + (state.updating ? `<div class="notice info global">${t('upd.restarting')}</div>` : '')
+    + Object.entries(down).map(([tunnel, names]) => `<div class="notice error global plain">${t('vpn.warnDown', { name: esc(tunnel), stacks: names.map(esc).join(', ') })}
+        <a href="#/settings/vpn">${t('vpn.warnOpen')}</a></div>`).join('');
 }
 
 function renderStackList() {
@@ -495,6 +509,7 @@ function renderStackList() {
       <li><a href="#/stack/${esc(s.name)}" class="${s.name === current ? 'active' : ''}" title="${esc(stateLabel(s.state))}">
         <span class="dot ${s.state}"></span>${esc(s.name)}
         ${s.updateAvailable ? `<span class="upd" title="${esc(t('upd.stackBadge'))}" aria-label="${esc(t('upd.stackBadge'))}">↑</span>` : ''}
+        ${s.vpn ? `<span class="vpn-tag ${s.vpn.ok ? '' : 'bad'}" title="${esc(t(s.vpn.ok ? 'vpn.tagOk' : 'vpn.tagDown', { name: s.vpn.tunnel }))}">VPN${s.vpn.ok ? '' : ' ✕'}</span>` : ''}
         <span class="count">${s.total ? `${s.running}/${s.total}` : ''}</span>
       </a></li>`).join('')
     : `<li class="empty-hint">${t('nav.noStacks')}</li>`;
@@ -504,6 +519,7 @@ async function refreshStacks() {
   try {
     state.stacks = await api('GET', '/api/stacks');
     renderStackList();
+    renderGlobalWarning();
     if (route().page === 'home') renderHome();
   } catch { /* e.g. logged out */ }
 }
@@ -636,7 +652,7 @@ async function renderStack(name) {
     <div id="notice"></div>
     <div id="op-wrap" hidden><h2 id="op-title">${t('act.operation')}</h2><pre class="terminal" id="op"></pre><br></div>
     <div class="tabs" role="tablist">
-      ${['compose', 'env', 'domain', 'containers', 'logs', 'backups', 'history', 'delete']
+      ${['compose', 'env', 'domain', 'vpn', 'containers', 'logs', 'backups', 'history', 'delete']
         .map((k, i) => `<button data-tab="${k}" class="${i === 0 ? 'on' : ''}">${t(`tab.${k}`)}</button>`).join('')}
     </div>
     <div id="tab"></div>`;
@@ -838,6 +854,67 @@ async function renderStack(name) {
       }));
     },
 
+    async vpn() {
+      tab.innerHTML = `<p class="hint">${t('stack.loading')}</p>`;
+      let info;
+      try {
+        info = await api('GET', `/api/stacks/${name}/vpn`);
+      } catch (err) {
+        tab.innerHTML = errorBox(err);
+        return;
+      }
+      if (currentTab !== 'vpn') return;
+      if (!info.tunnels.length) {
+        tab.innerHTML = `<div class="card"><h2>${t('vpn.stackTitle')}</h2><p class="hint">${t('vpn.noTunnels')}</p>
+          <a class="btn" href="#/settings/vpn">${t('vpn.goSettings')}</a></div>`;
+        return;
+      }
+      const cur = info.attach || { tunnel: '', services: [] };
+      tab.innerHTML = `
+        <form class="card" id="vpn-form">
+          <h2>${t('vpn.stackTitle')}</h2>
+          <p class="hint" style="margin-top:-4px">${t('vpn.stackLead')}</p>
+          <div class="field"><label for="vpn-tunnel">${t('vpn.tunnel')}</label>
+            <select id="vpn-tunnel" class="lang">
+              <option value="">${t('vpn.none')}</option>
+              ${info.tunnels.map((x) => `<option value="${esc(x.name)}" ${x.name === cur.tunnel ? 'selected' : ''}>${esc(x.name)} – ${t(`vpn.state.${x.state}`)}</option>`).join('')}
+            </select></div>
+          <div class="field" id="vpn-svcs">
+            <label>${t('vpn.services')}</label>
+            ${info.services.map((sv) => `<label class="check"><input type="checkbox" value="${esc(sv.name)}" ${cur.services.includes(sv.name) ? 'checked' : ''} ${sv.hostNetwork ? 'disabled' : ''}>
+              <span><strong>${esc(sv.name)}</strong>${sv.ports.length ? ` <span class="hint">${t('vpn.portsMove', { ports: esc(sv.ports.join(', ')) })}</span>` : ''}${sv.hostNetwork ? ` <span class="hint">${t('vpn.hostNet')}</span>` : ''}</span></label>`).join('')}
+            <p class="hint">${t('vpn.servicesHint')}</p>
+          </div>
+          <div class="notice info" style="margin-bottom:12px">${t('vpn.killSwitchNote')}</div>
+          <div id="vpn-out"></div>
+          <button class="btn primary">${t('vpn.saveApply')}</button>
+        </form>
+        <div id="vpn-op" hidden><pre class="terminal" id="vpn-term"></pre></div>`;
+      const sync = () => {
+        const off = !document.getElementById('vpn-tunnel').value;
+        document.querySelectorAll('#vpn-svcs input').forEach((el) => { if (!el.hasAttribute('data-host')) el.closest('label').style.opacity = off ? 0.5 : 1; });
+      };
+      document.getElementById('vpn-tunnel').addEventListener('change', sync);
+      sync();
+      document.getElementById('vpn-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const tunnel = document.getElementById('vpn-tunnel').value;
+        const services = [...document.querySelectorAll('#vpn-svcs input:checked')].map((el) => el.value);
+        const out = document.getElementById('vpn-out');
+        if (tunnel && !services.length) { out.innerHTML = `<div class="notice error">${t('vpn.pickService')}</div>`; return; }
+        out.innerHTML = '';
+        e.submitter.disabled = true;
+        const pre = document.getElementById('vpn-term');
+        document.getElementById('vpn-op').hidden = false;
+        pre.textContent = '';
+        const code = await stream('PUT', `/api/stacks/${name}/vpn`, (txt) => appendTo(pre, txt), undefined, { tunnel: tunnel || null, services })
+          .catch((err) => { appendTo(pre, `\n${err.message}\n`); return 1; });
+        e.submitter.disabled = false;
+        toast(t(code === 0 ? 'toast.done' : 'toast.failed'));
+        refreshStacks();
+      });
+    },
+
     async domain() {
       tab.innerHTML = `<p class="hint">${t('stack.loading')}</p>`;
       let info;
@@ -1014,7 +1091,7 @@ function revealActiveTab(nav, smooth = false) {
   nav.scrollTo({ left: Math.max(0, left), behavior: smooth ? 'smooth' : 'auto' });
 }
 
-const SETTINGS_TABS = ['general', 'domains', 'updates', 'backups', 'account'];
+const SETTINGS_TABS = ['general', 'domains', 'vpn', 'updates', 'backups', 'account'];
 
 async function renderSettings(tab = 'general') {
   if (!SETTINGS_TABS.includes(tab)) tab = 'general';
@@ -1029,7 +1106,7 @@ async function renderSettings(tab = 'general') {
   const body = document.getElementById('set-body');
   const s = await api('GET', '/api/settings');
   if (route().page !== 'settings') return;
-  ({ general: settingsGeneral, domains: settingsDomains, updates: settingsUpdates, backups: settingsBackups, account: settingsAccount })[tab](body, s);
+  ({ general: settingsGeneral, domains: settingsDomains, vpn: settingsVpn, updates: settingsUpdates, backups: settingsBackups, account: settingsAccount })[tab](body, s);
 }
 
 function settingsGeneral(body, s) {
@@ -1191,6 +1268,125 @@ function waitForRestart() {
       location.reload();
     }
   }, 2000);
+}
+
+// ---------- VPN ----------
+
+const ago = (iso) => {
+  const s = Math.round((Date.now() - Date.parse(iso)) / 1000);
+  if (s < 60) return t('vpn.agoS', { n: s });
+  if (s < 3600) return t('vpn.agoM', { n: Math.round(s / 60) });
+  return t('vpn.agoH', { n: Math.round(s / 3600) });
+};
+
+async function settingsVpn(body) {
+  let d;
+  try {
+    d = await api('GET', '/api/vpn');
+  } catch (err) {
+    body.innerHTML = errorBox(err);
+    return;
+  }
+  if (route().tab !== 'vpn') return;
+  const pill = (st) => {
+    const k = st?.state || 'unknown';
+    return `<span class="badge ${k === 'up' ? 'running' : k === 'down' ? 'exited' : 'partial'}">${t(`vpn.state.${k}`)}</span>`;
+  };
+  const card = (x) => `
+    <div class="card vpn-card" data-name="${esc(x.name)}">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <h2 style="margin:0">${esc(x.name)}</h2>${pill(x.status)}
+      </div>
+      <div class="kv" style="margin-top:10px">
+        <span>${t('vpn.mode')}</span><strong>${x.full ? t('vpn.modeFull') : t('vpn.modeSplit', { nets: esc((x.allowedIps || []).filter((c) => !c.includes(':')).join(', ')) })}</strong>
+        <span>${t('vpn.server')}</span><strong>${esc((x.endpoints || []).join(', '))}</strong>
+        <span>${t('vpn.address')}</span><strong>${esc(x.address || '')}</strong>
+        <span>${t('vpn.handshake')}</span><strong>${x.status?.handshake ? ago(x.status.handshake) : '—'}</strong>
+        <span>${t('vpn.usedBy')}</span><strong>${x.stacks.length ? x.stacks.map((s) => `<a href="#/stack/${esc(s.stack)}">${esc(s.stack)}</a> (${s.services.map(esc).join(', ')})`).join(', ') : '—'}</strong>
+      </div>
+      ${x.status?.state === 'down' ? `<div class="notice error" style="margin-top:10px">${t('vpn.downHint')}</div>` : ''}
+      <div class="row" style="gap:8px;margin-top:12px">
+        <button type="button" class="btn small" data-act="restart">${t('vpn.restart')}</button>
+        <button type="button" class="btn small" data-act="conf">${t('vpn.replaceConf')}</button>
+        <button type="button" class="btn small danger" data-act="remove" ${x.stacks.length ? `disabled title="${esc(t('vpn.removeInUse'))}"` : ''}>${t('vpn.remove')}</button>
+      </div>
+      <div class="vpn-conf-box" hidden>
+        <textarea class="code env" spellcheck="false" placeholder="[Interface]&#10;PrivateKey = …"></textarea>
+        <button type="button" class="btn primary small" data-act="saveconf" style="margin-top:8px">${t('vpn.saveConf')}</button>
+      </div>
+      <pre class="terminal" hidden></pre>
+    </div>`;
+  body.innerHTML = `
+    <div class="card">
+      <h2>${t('vpn.title')}</h2>
+      <p class="hint" style="margin-top:-4px">${t('vpn.lead')}</p>
+    </div>
+    ${d.tunnels.map(card).join('')}
+    <form class="card" id="vpn-add">
+      <h2>${t('vpn.addTitle')}</h2>
+      <div class="field"><label for="vpn-name">${t('vpn.name')}</label>
+        <input type="text" id="vpn-name" placeholder="home" autocapitalize="off" autocomplete="off" style="max-width:240px" required></div>
+      <div class="field"><label for="vpn-conf">${t('vpn.conf')}</label>
+        <textarea id="vpn-conf" class="code env" spellcheck="false" placeholder="[Interface]&#10;PrivateKey = …&#10;Address = 10.8.0.5/32&#10;&#10;[Peer]&#10;PublicKey = …&#10;Endpoint = vpn.example.com:51820&#10;AllowedIPs = 0.0.0.0/0" required></textarea>
+        <input type="file" id="vpn-file" accept=".conf,text/plain" style="margin-top:8px">
+        <p class="hint">${t('vpn.confHint')}</p></div>
+      <div class="notice info" style="margin-bottom:12px">${t('vpn.killSwitchNote')}</div>
+      <div id="vpn-add-out"></div>
+      <button class="btn primary">${t('vpn.add')}</button>
+      <pre class="terminal" id="vpn-add-term" hidden style="margin-top:12px"></pre>
+    </form>`;
+
+  document.getElementById('vpn-file').addEventListener('change', async (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    document.getElementById('vpn-conf').value = await f.text();
+    const nameEl = document.getElementById('vpn-name');
+    if (!nameEl.value) nameEl.value = f.name.replace(/\.conf$/i, '').toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 21);
+  });
+  const run = async (pre, method, url, payload) => {
+    pre.hidden = false;
+    pre.textContent = '';
+    const code = await stream(method, url, (txt) => appendTo(pre, txt), undefined, payload)
+      .catch((err) => { appendTo(pre, `\n${err.message}\n`); return 1; });
+    toast(t(code === 0 ? 'toast.done' : 'toast.failed'));
+    return code;
+  };
+  document.getElementById('vpn-add').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    e.submitter.disabled = true;
+    const code = await run(document.getElementById('vpn-add-term'), 'POST', '/api/vpn', {
+      name: document.getElementById('vpn-name').value, conf: document.getElementById('vpn-conf').value,
+    });
+    e.submitter.disabled = false;
+    if (code === 0) setTimeout(() => { if (route().tab === 'vpn') settingsVpn(body); }, 4000);
+  });
+  body.querySelectorAll('.vpn-card').forEach((c) => {
+    const name = c.dataset.name;
+    const pre = c.querySelector('pre');
+    c.querySelector('[data-act="restart"]').addEventListener('click', async () => {
+      await run(pre, 'POST', `/api/vpn/${name}/restart`);
+      setTimeout(() => { if (route().tab === 'vpn') settingsVpn(body); }, 5000);
+    });
+    c.querySelector('[data-act="conf"]').addEventListener('click', () => { c.querySelector('.vpn-conf-box').hidden = false; });
+    c.querySelector('[data-act="saveconf"]').addEventListener('click', async () => {
+      const code = await run(pre, 'PUT', `/api/vpn/${name}`, { conf: c.querySelector('textarea').value });
+      if (code === 0) setTimeout(() => { if (route().tab === 'vpn') settingsVpn(body); }, 4000);
+    });
+    c.querySelector('[data-act="remove"]').addEventListener('click', async () => {
+      if (!confirm(t('vpn.removeConfirm', { name }))) return;
+      try {
+        await api('DELETE', `/api/vpn/${name}`);
+        toast(t('toast.done'));
+        settingsVpn(body);
+      } catch (err) {
+        toast(err.message);
+      }
+    });
+  });
+  // While a tunnel is connecting, look again in a moment.
+  if (d.tunnels.some((x) => x.status?.state === 'connecting')) {
+    setTimeout(() => { if (route().tab === 'vpn' && body.isConnected) settingsVpn(body); }, 10_000);
+  }
 }
 
 /**

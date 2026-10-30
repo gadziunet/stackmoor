@@ -30,7 +30,7 @@ function parseLsStatus(status = '') {
 // t = translate function from i18n.js, passed in from the request (user's language).
 export function createStacks({ db, stacksDir, getSettings }) {
   const locks = new Set();
-  // Set by other modules (backups): hooks.beforeUpdate(name, log, t).
+  // Set by other modules: hooks.beforeUpdate (backups), hooks.beforeUp / afterUp (VPN) – (name, log, t).
   const hooks = {};
 
   const stackDir = (name) => path.join(stacksDir, name);
@@ -62,13 +62,13 @@ export function createStacks({ db, stacksDir, getSettings }) {
   // Stackmoor-generated additions (e.g. joining the "stackmoor" network for domains)
   // live in a separate override file, so the user's compose.yaml stays untouched.
   const OVERRIDE = 'compose.stackmoor.yaml';
-  const base = (name, file) => {
+  const base = (name, file, { raw = false } = {}) => {
     const args = [
       'compose', '--ansi', 'never', '--progress', 'plain',
       '-p', name, '--project-directory', stackDir(name), '-f', file,
     ];
     const override = path.join(stackDir(name), OVERRIDE);
-    if (fs.existsSync(override)) args.push('-f', override);
+    if (!raw && fs.existsSync(override)) args.push('-f', override);
     return args;
   };
 
@@ -181,8 +181,8 @@ export function createStacks({ db, stacksDir, getSettings }) {
 
   // ---------- preparing a start ----------
 
-  async function resolvedConfig(name, file) {
-    const r = await docker([...base(name, file), 'config', '--format', 'json']);
+  async function resolvedConfig(name, file, opts = {}) {
+    const r = await docker([...base(name, file, opts), 'config', '--format', 'json']);
     if (r.code !== 0) throw new UserError('compose.configFailed', { output: r.output.trim() });
     return JSON.parse(r.stdout);
   }
@@ -309,14 +309,18 @@ export function createStacks({ db, stacksDir, getSettings }) {
       switch (act) {
         case 'up':
           file = await prepare(name, log, t);
+          if (hooks.beforeUp) await hooks.beforeUp(name, log, t);
           await step(['up', '-d', '--remove-orphans']);
+          if (hooks.afterUp) await hooks.afterUp(name, log, t);
           break;
         case 'update':
           // Backup first (if set up); a failed backup stops the update.
           if (hooks.beforeUpdate) await hooks.beforeUpdate(name, log, t);
           await step(['pull']);
           file = await prepare(name, log, t);
+          if (hooks.beforeUp) await hooks.beforeUp(name, log, t);
           await step(['up', '-d', '--remove-orphans']);
+          if (hooks.afterUp) await hooks.afterUp(name, log, t);
           break;
         case 'stop':
           await step(['stop']);
@@ -395,8 +399,9 @@ export function createStacks({ db, stacksDir, getSettings }) {
   }
 
   // Resolved config of a stack (with variables and the override applied).
-  async function config(name) {
-    return resolvedConfig(name, requireStack(name));
+  /** The stack's resolved compose config. raw: without Stackmoor's override (the user's own setup). */
+  async function config(name, opts = {}) {
+    return resolvedConfig(name, requireStack(name), opts);
   }
 
   /** Runs fn while the stack is locked (no start/stop/update at the same time). */

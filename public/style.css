@@ -175,6 +175,11 @@ td code { font-size: 12.5px; }
 .choice span { color: var(--muted); font-size: 13.5px; }
 @media (max-width: 560px) { .choices { grid-template-columns: 1fr; } }
 .choices[hidden] { display: none; }
+.vpn-tag { font-size: 10.5px; font-weight: 600; padding: 1px 5px; border-radius: 5px; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); margin-left: 4px; }
+.vpn-tag.bad { background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad); }
+.vpn-card .kv a { color: var(--accent); }
+.notice.plain { font-family: var(--sans); font-size: 14px; white-space: normal; }
+.notice.plain a { margin-left: 6px; }
 .run-pick { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 14px; }
 .run-option { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
 .progress { height: 6px; border-radius: 99px; background: var(--line); overflow: hidden; margin: 0 0 14px; }
