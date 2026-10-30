@@ -228,31 +228,45 @@ async function renderAccessStep() {
   });
 }
 
-/** After the wizard set up the domain: wait for the certificate, then offer the new address. */
+/**
+ * After the wizard set up the domain: wait for the certificate (up to 10 minutes), showing
+ * what is going on every 10 seconds, then offer the new address.
+ */
 async function waitForCertificate(el, finish) {
   const box = document.createElement('div');
   box.className = 'notice info';
   box.style.marginTop = '14px';
-  box.innerHTML = `<strong>${t('acc2.waitCert')}</strong><p class="hint" style="margin:6px 0 0">${t('acc2.waitCertHint')}</p>`;
   el.appendChild(box);
   box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   const started = Date.now();
+  const mmss = (ms) => { const s = Math.round(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+  const LIMIT = 10 * 60e3;
   for (;;) {
     const st = await api('GET', '/api/domains/status').catch(() => null);
-    const done = st?.certificate;
-    if (done || Date.now() - started > 4 * 60e3) {
+    const elapsed = Date.now() - started;
+    if (st?.certificate || elapsed > LIMIT) {
       const url = st?.panelUrl || '';
-      box.innerHTML = done
+      box.innerHTML = st?.certificate
         ? `<strong>✓ ${t('acc2.ready')}</strong>
            ${url ? `<p class="hint" style="margin:6px 0 10px">${t('acc2.readyHint', { url: esc(url) })}</p>
              <a class="btn primary" href="${esc(url)}">${t('acc2.open', { url: esc(url.replace('https://', '')) })}</a>` : ''}
            <button type="button" class="btn" id="acc-stay" style="margin-left:6px">${t('acc2.stay')}</button>`
         : `<strong>${t('acc2.slow')}</strong><p class="hint" style="margin:6px 0 10px">${t('acc2.slowHint')}</p>
+           ${st?.errors?.length ? `<div class="notice error" style="margin-bottom:10px">${st.errors.map(esc).join('\n')}</div>` : ''}
            <button type="button" class="btn" id="acc-stay">${t('acc2.continue')}</button>`;
       box.querySelector('#acc-stay').addEventListener('click', finish);
       return;
     }
-    await new Promise((r) => setTimeout(r, 4000));
+    // Rough phases: Caddy waits <propagation> s after adding the TXT record, then Let's Encrypt checks.
+    const wait = (st?.propagation || 0) * 1000;
+    const phase = elapsed < 15e3 ? t('acc2.phaseTxt')
+      : elapsed < wait + 15e3 ? t('acc2.phaseWait', { left: Math.max(0, Math.round((wait + 15e3 - elapsed) / 1000)) })
+        : t('acc2.phaseCheck');
+    box.innerHTML = `<strong>${t('acc2.waitCert')}</strong>
+      <p class="hint" style="margin:6px 0 0">${phase}</p>
+      <p class="hint" style="margin:4px 0 0">${t('acc2.elapsed', { time: mmss(elapsed) })}</p>
+      ${st?.errors?.length ? `<p class="hint" style="margin:8px 0 0">${t('acc2.retrying')}</p><div class="notice error" style="margin-top:6px">${esc(st.errors.at(-1))}</div>` : ''}`;
+    await new Promise((r) => setTimeout(r, 10_000));
   }
 }
 
@@ -1199,7 +1213,9 @@ function domainForm(box, d, { onApplied, submitLabel } = {}) {
         <select id="dom-provider" class="lang">${providerOptions}</select></div>
       <div id="dom-fields"></div>
       <div class="field"><label for="dom-ip">${t('dom.serverIp')}</label>
-        <input type="text" id="dom-ip" value="${esc(d.serverIp || d.suggestedIp || '')}" placeholder="192.168.1.50" inputmode="decimal" autocomplete="off">
+        <input type="text" id="dom-ip" value="${esc((d.serverIpAuto !== false ? d.detectedIp || d.serverIp : d.serverIp) || d.suggestedIp || '')}" placeholder="192.168.1.50" inputmode="decimal" autocomplete="off" ${d.serverIpAuto !== false ? 'readonly' : ''}>
+        <label class="check" style="margin-top:8px"><input type="checkbox" id="dom-ip-auto" ${d.serverIpAuto !== false ? 'checked' : ''}>
+          <span>${t('dom.serverIpAuto')}</span></label>
         <div id="dom-record"></div></div>
       <div class="field"><label for="dom-email">${t('dom.email')} <span class="hint">${t('new.envOptional')}</span></label>
         <input type="text" id="dom-email" value="${esc(d.acmeEmail)}" placeholder="you@example.com" autocapitalize="off"></div>
@@ -1209,6 +1225,9 @@ function domainForm(box, d, { onApplied, submitLabel } = {}) {
           <div style="flex:1;min-width:120px"><label for="dom-https">HTTPS</label><input type="number" id="dom-https" value="${esc(d.httpsPort)}"></div>
         </div>
         <p class="hint">${t('dom.portsHint')}</p>
+        <div style="margin-top:12px"><label for="dom-prop">${t('dom.propagation')}</label>
+          <input type="number" id="dom-prop" min="0" max="3600" step="1" value="${d.propagationSeconds ?? ''}" style="max-width:160px">
+          <p class="hint" id="dom-prop-hint"></p></div>
       </details>
       <div id="dom-out"></div>
       <button class="btn primary">${submitLabel || t('dom.saveApply')}</button>
@@ -1246,11 +1265,23 @@ function domainForm(box, d, { onApplied, submitLabel } = {}) {
     const auto = prev ? prev.checked : d.autoDnsRecord !== false;
     $('dom-record').innerHTML = p?.autoRecord
       ? `<label class="check" style="margin-top:8px"><input type="checkbox" id="dom-auto" ${auto ? 'checked' : ''}>
-          <span>${t('dom.autoRecord', { name: esc(`*.${domain}`) })}</span></label>`
-      : `<p class="hint">${t('dom.manualRecord', { name: esc(`*.${domain}`), ip: esc(ip) })}</p>`;
+          <span>${t('dom.autoRecord', { name: esc(`${domain}, *.${domain}`) })}</span></label>`
+      : `<p class="hint">${t('dom.manualRecord', { name: esc(`${domain}, *.${domain}`), ip: esc(ip) })}</p>`;
+  };
+  const drawProp = () => {
+    const p = provider();
+    $('dom-prop').placeholder = String(p?.propagation ?? 0);
+    $('dom-prop-hint').innerHTML = t('dom.propagationHint', { n: p?.propagation ?? 0 });
   };
   drawFields();
-  $('dom-provider').addEventListener('change', drawFields);
+  drawProp();
+  $('dom-provider').addEventListener('change', () => { drawFields(); drawProp(); });
+  $('dom-ip-auto').addEventListener('change', (e) => {
+    const ip = $('dom-ip');
+    ip.readOnly = e.target.checked;
+    if (e.target.checked && d.detectedIp) ip.value = d.detectedIp;
+    drawRecord();
+  });
   $('dom-domain').addEventListener('input', drawRecord);
   $('dom-ip').addEventListener('input', () => { if (!provider()?.autoRecord) drawRecord(); });
 
@@ -1261,6 +1292,8 @@ function domainForm(box, d, { onApplied, submitLabel } = {}) {
       domain: $('dom-domain').value.trim(),
       dnsProvider: $('dom-provider').value,
       serverIp: $('dom-ip').value.trim(),
+      serverIpAuto: $('dom-ip-auto').checked,
+      propagationSeconds: $('dom-prop').value === '' ? null : Number($('dom-prop').value),
       autoDnsRecord: $('dom-auto') ? $('dom-auto').checked : d.autoDnsRecord !== false,
       acmeEmail: $('dom-email').value,
       httpPort: Number($('dom-http').value),
@@ -1307,7 +1340,7 @@ function domainForm(box, d, { onApplied, submitLabel } = {}) {
       return;
     }
     btn.disabled = false;
-    const name = `*.${c.domain}`;
+    const name = `${c.domain} / *.${c.domain}`;
     if (c.api && !c.api.ok) {
       out.innerHTML = `<div class="notice error">${t(`dom.apiError.${c.api.kind}`, { message: esc(c.api.message || '') })}</div>`;
       return;
@@ -1334,22 +1367,6 @@ async function settingsDomains(body) {
   }
   if (route().page !== 'settings') return;
   const st = d.status || {};
-  const statusBox = !st.enabled ? '' : `
-    <div class="card">
-      <h2>${t('dom.status')}</h2>
-      <div class="kv">
-        <span>Caddy</span><strong>${st.running ? '✓ ' + t('dom.running') : '✕ ' + t('dom.stopped')}</strong>
-        <span>${t('dom.cert')}</span><strong>${st.certificate ? `✓ *.${esc(st.domain)}` : t('dom.certWaiting')}</strong>
-        ${st.panelUrl ? `<span>${t('dom.panelUrl')}</span><a href="${esc(st.panelUrl)}">${esc(st.panelUrl.replace('https://', ''))}</a>` : ''}
-      </div>
-      ${st.errors?.length ? `<div class="notice error">${st.errors.map(esc).join('\n')}</div>` : ''}
-      ${st.imageProblem ? `<div class="notice info">${t('dom.caddyImageProblem', { image: esc(st.imageProblem) })}</div>` : ''}
-      <p class="hint">${d.autoDnsRecord && d.serverIp && d.providers.find((p) => p.id === d.dnsProvider)?.autoRecord
-        ? t('dom.recordAuto', { name: esc(`*.${st.domain}`), ip: esc(d.serverIp) })
-        : t('dom.dnsRecord', { domain: esc(st.domain) })}</p>
-      <button type="button" class="btn small" id="dom-refresh">${t('logs.refresh')}</button>
-    </div>`;
-
   const panelBox = !d.domain ? '' : `
     <form class="card" id="panel-form">
       <h2>${t('dom.panelTitle')}</h2>
@@ -1366,7 +1383,7 @@ async function settingsDomains(body) {
 
   body.innerHTML = `
     ${panelBox}
-    ${statusBox}
+    ${st.enabled ? '<div class="card" id="dom-status"></div>' : ''}
     <div class="card">
       <h2>${t('dom.title')}</h2>
       <p class="hint" style="margin-top:-4px">${t('dom.lead')}</p>
@@ -1408,7 +1425,67 @@ async function settingsDomains(body) {
       out.innerHTML = errorBox(err);
     }
   });
-  document.getElementById('dom-refresh')?.addEventListener('click', () => settingsDomains(body));
+  if (st.enabled) domainStatus(document.getElementById('dom-status'), d, st);
+}
+
+/**
+ * The Status card in Settings → Domains. Refresh updates only this card; while the
+ * certificate is not there yet, it refreshes itself every 10 s.
+ */
+function domainStatus(card, d, st) {
+  const autoRecord = d.autoDnsRecord && d.serverIp && d.providers.find((p) => p.id === d.dnsProvider)?.autoRecord;
+  const time = (iso) => new Date(iso).toLocaleTimeString(lang === 'pl' ? 'pl-PL' : 'en-GB');
+  const draw = (s, busy = false) => {
+    s = { ...s, domain: s.domain || d.domain };
+    card.innerHTML = `
+      <h2>${t('dom.status')}</h2>
+      <div class="kv">
+        <span>Caddy</span><strong>${s.running ? '✓ ' + t('dom.running') : '✕ ' + t('dom.stopped')}</strong>
+        <span>${t('dom.cert')}</span><strong>${s.certificate ? `✓ *.${esc(s.domain)}` : t('dom.certWaiting')}</strong>
+        ${s.panelUrl ? `<span>${t('dom.panelUrl')}</span><a href="${esc(s.panelUrl)}">${esc(s.panelUrl.replace('https://', ''))}</a>` : ''}
+      </div>
+      ${s.errors?.length ? `<div class="notice error">${s.errors.map(esc).join('\n')}</div>` : ''}
+      ${s.imageProblem ? `<div class="notice info">${t('dom.caddyImageProblem', { image: esc(s.imageProblem) })}</div>` : ''}
+      ${d.ipChange ? `<div class="notice info">${t('dom.ipChanged', { from: esc(d.ipChange.from), to: esc(d.ipChange.to), when: esc(new Date(d.ipChange.at).toLocaleString(lang === 'pl' ? 'pl-PL' : 'en-GB')) })}${d.ipChange.record ? ' ' + t('dom.ipChangedRecord') : ''}</div>` : ''}
+      <p class="hint">${autoRecord
+        ? t('dom.recordAuto', { name: esc(`${s.domain}, *.${s.domain}`), ip: esc(d.serverIp) })
+        : t('dom.dnsRecord', { domain: esc(s.domain) })}</p>
+      <div class="row" style="align-items:center;gap:8px">
+        <button type="button" class="btn small" id="dom-refresh" ${busy ? 'disabled' : ''}>${busy ? t('dom.refreshing') : t('logs.refresh')}</button>
+        ${!s.certificate && s.running ? `<button type="button" class="btn small" id="dom-retry" ${busy ? 'disabled' : ''}>${t('dom.retryCert')}</button>` : ''}
+        <span class="hint">${s.checkedAt ? t('dom.checkedAt', { time: esc(time(s.checkedAt)) }) : ''}${!s.certificate ? ` · ${t('dom.autoRefresh')}` : ''}</span>
+      </div>`;
+    card.querySelector('#dom-refresh').addEventListener('click', () => refresh());
+    card.querySelector('#dom-retry')?.addEventListener('click', async (e) => {
+      if (!confirm(t('dom.retryConfirm'))) return;
+      e.target.disabled = true;
+      e.target.textContent = t('dom.retrying');
+      try {
+        await api('POST', '/api/domains/retry-cert');
+        toast(t('dom.retryStarted'));
+      } catch (err) {
+        toast(err.message);
+      }
+      setTimeout(refresh, 3000);
+    });
+  };
+  let current = st;
+  let timer = null;
+  const refresh = async () => {
+    if (!card.isConnected) return;
+    draw(current, true);
+    const next = await api('GET', '/api/domains/status').catch(() => null);
+    if (!card.isConnected) return;
+    if (next) current = next;
+    draw(current);
+    schedule();
+  };
+  const schedule = () => {
+    clearTimeout(timer);
+    if (!current.certificate) timer = setTimeout(() => { if (card.isConnected && route().tab === 'domains') refresh(); }, 10_000);
+  };
+  draw(current);
+  schedule();
 }
 
 // ---------- backups ----------

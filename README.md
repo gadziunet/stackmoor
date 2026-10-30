@@ -54,7 +54,7 @@ Automatic volumes can be turned off per stack.
 Give every stack an address like `cloud.home.example.com` with a real HTTPS certificate – no ports to remember, and the server does not have to be reachable from the internet.
 
 1. **Right after installing** (or later in **Settings → Domains**): enter your domain, pick your DNS provider (Cloudflare, Bunny, OVHcloud, Hetzner, DigitalOcean, Porkbun, Namecheap, GoDaddy, IONOS, netcup, Gandi, AWS Route 53, deSEC, DuckDNS) and paste its API key. Keys are stored encrypted.
-2. The DNS record `*.home.example.com` → the server's local IP is **added automatically** for Cloudflare, Bunny, Hetzner, DigitalOcean, Porkbun, deSEC and DuckDNS. With other providers, add it by hand. Before saving, Stackmoor checks the API key and warns if the domain already points to another server.
+2. The DNS records `home.example.com` and `*.home.example.com` → the server's local IP are **added automatically** for Cloudflare, Bunny, Hetzner, DigitalOcean, Porkbun, deSEC and DuckDNS (with other providers, add them by hand). The server's IP is detected automatically and the records are updated when it changes. Before saving, Stackmoor checks the API key and warns if the domain already points to another server.
 3. **Stack → Domain:** choose a subdomain, the service and its port inside the container.
 
 Stackmoor runs Caddy in its own container (`stackmoor-caddy`) with one wildcard certificate for all apps. Caddy is updated together with the panel – each release ships its own Caddy image. The DNS provider can be changed any time in Settings. On Unraid, ports 80/443 are used by its web UI – choose other ports under *Advanced*.

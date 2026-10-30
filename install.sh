@@ -24,6 +24,7 @@ bold() { printf '\033[1m%s\033[0m\n' "$*"; }
 info() { printf '  \033[32m✓\033[0m %s\n' "$*"; }
 step() { printf '\n\033[1;36m▸ %s\033[0m\n' "$*"; }
 die()  { printf '\n\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
+warn() { printf '  \033[33m!\033[0m %s\n' "$*"; }
 
 # ---------- checks ----------
 
@@ -78,8 +79,23 @@ else
   curl -fsSL https://get.docker.com | sh
 fi
 
-if command -v systemctl >/dev/null 2>&1; then
-  systemctl enable --now docker >/dev/null 2>&1 || true
+# Docker (and containerd, which it needs) must start with the system – otherwise the panel,
+# Caddy and your stacks stay down after a reboot even with restart: unless-stopped.
+BOOT_OK=1
+if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+  for unit in containerd docker; do
+    systemctl list-unit-files "${unit}.service" >/dev/null 2>&1 || continue
+    systemctl enable --now "${unit}.service" >/dev/null 2>&1 || true
+    if [ "$(systemctl is-enabled "${unit}.service" 2>/dev/null)" = enabled ]; then
+      info "${unit} starts with the system"
+    else
+      BOOT_OK=0
+      warn "${unit} is not set to start with the system. Run: systemctl enable ${unit}"
+    fi
+  done
+else
+  BOOT_OK=0
+  warn "No systemd here – make sure Docker starts when the system boots."
 fi
 
 if ! docker compose version >/dev/null 2>&1; then
@@ -170,6 +186,7 @@ echo
 echo "  Open:   http://${IP}:${PORT}"
 echo "  Logs:   docker logs -f stackmoor"
 echo "  Update: run this installer again"
+[ "${BOOT_OK:-1}" = 1 ] && echo "  Boot:   Docker, the panel and your stacks start with the system"
 echo
 echo "  Stackmoor controls Docker on this machine – keep it on your local network or behind a VPN."
 echo

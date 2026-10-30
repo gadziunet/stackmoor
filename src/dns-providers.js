@@ -17,6 +17,7 @@ export const PROVIDERS = [
   {
     id: 'bunny', name: 'Bunny DNS', module: 'github.com/caddy-dns/bunny',
     fields: [secret('access_key', 'API key')],
+    propagationDelay: '120s', // Bunny's name servers can take a while to all see a new TXT record
     help: {
       en: 'dash.bunny.net → Account settings → API key.',
       pl: 'dash.bunny.net → Account settings → API key.',
@@ -132,6 +133,9 @@ export const PROVIDERS = [
 ];
 
 export const providerById = (id) => PROVIDERS.find((p) => p.id === id) || null;
+
+/** Default seconds to wait after adding the TXT record, before Let's Encrypt checks it. */
+export const defaultPropagation = (id) => parseInt(providerById(id)?.propagationDelay || '0', 10) || 0;
 
 /** The "provider" object for Caddy's DNS challenge config. */
 export function providerJson(id, values) {

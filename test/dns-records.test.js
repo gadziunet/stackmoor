@@ -38,10 +38,13 @@ test('Cloudflare: finds the parent zone and creates *.home', async () => {
     'POST /client/v4/zones/Z1/dns_records': () => [200, { success: true, result: {} }],
   });
   const r = await upsertRecord({ domain: 'home.example.com', provider: 'cloudflare', credentials: { api_token: 'T' }, ip: '192.168.1.5', fetchFn: f });
-  assert.deepEqual(r, { action: 'created', zone: 'example.com' });
-  const post = f.calls.find((c) => c.key.startsWith('POST'));
-  assert.deepEqual(post.body, { type: 'A', name: '*.home.example.com', content: '192.168.1.5', ttl: 1, proxied: false });
-  assert.equal(post.headers.Authorization, 'Bearer T');
+  assert.equal(r.action, 'created');
+  assert.equal(r.zone, 'example.com');
+  // Both the wildcard and the domain itself.
+  const posts = f.calls.filter((c) => c.key.startsWith('POST'));
+  assert.deepEqual(posts.map((p) => p.body.name), ['*.home.example.com', 'home.example.com']);
+  assert.deepEqual(posts[0].body, { type: 'A', name: '*.home.example.com', content: '192.168.1.5', ttl: 1, proxied: false });
+  assert.equal(posts[0].headers.Authorization, 'Bearer T');
 });
 
 test('Cloudflare: same IP → unchanged, other IP → updated', async () => {
@@ -71,7 +74,11 @@ test('Bunny: relative record name in the zone', async () => {
   });
   const r = await upsertRecord({ domain: 'dom.svr10.eu', provider: 'bunny', credentials: { access_key: 'K' }, ip: '192.168.40.2', fetchFn: f });
   assert.equal(r.action, 'created');
-  assert.deepEqual(f.calls.at(-1).body, { Type: 0, Name: '*.dom', Value: '192.168.40.2', Ttl: 300 });
+  const puts = f.calls.filter((c) => c.key.startsWith('PUT'));
+  assert.deepEqual(puts.map((p) => p.body), [
+    { Type: 0, Name: '*.dom', Value: '192.168.40.2', Ttl: 300 },
+    { Type: 0, Name: 'dom', Value: '192.168.40.2', Ttl: 300 },
+  ]);
   assert.equal(f.calls[0].headers.AccessKey, 'K');
 });
 
@@ -79,18 +86,21 @@ test('Hetzner, deSEC, DigitalOcean, Porkbun: create the record', async () => {
   const hz = fakeFetch({
     'GET /v1/zones': (_b, u) => [200, { zones: u.searchParams.get('name') === 'example.com' ? [{ id: 42 }] : [] }],
     'GET /v1/zones/42/rrsets/*.home/A': () => [404, {}],
+    'GET /v1/zones/42/rrsets/home/A': () => [404, {}],
     'POST /v1/zones/42/rrsets': () => [201, {}],
   });
   assert.equal((await upsertRecord({ domain: 'home.example.com', provider: 'hetzner', credentials: { api_token: 'T' }, ip: '10.0.0.2', fetchFn: hz })).action, 'created');
-  assert.deepEqual(hz.calls.at(-1).body, { name: '*.home', type: 'A', ttl: 300, records: [{ value: '10.0.0.2' }] });
+  assert.deepEqual(hz.calls.filter((c) => c.key === 'POST /v1/zones/42/rrsets').map((c) => c.body.name), ['*.home', 'home']);
+  assert.deepEqual(hz.calls.find((c) => c.key === 'POST /v1/zones/42/rrsets').body, { name: '*.home', type: 'A', ttl: 300, records: [{ value: '10.0.0.2' }] });
 
   const ds = fakeFetch({
     'GET /api/v1/domains/': () => [200, [{ name: 'example.com' }]],
     'GET /api/v1/domains/example.com/rrsets/*.home/A/': () => [404, {}],
+    'GET /api/v1/domains/example.com/rrsets/home/A/': () => [404, {}],
     'PUT /api/v1/domains/example.com/rrsets/': () => [200, []],
   });
   assert.equal((await upsertRecord({ domain: 'home.example.com', provider: 'desec', credentials: { token: 'T' }, ip: '10.0.0.2', fetchFn: ds })).action, 'created');
-  assert.deepEqual(ds.calls.at(-1).body, [{ subname: '*.home', type: 'A', ttl: 3600, records: ['10.0.0.2'] }]);
+  assert.deepEqual(ds.calls.filter((c) => c.key.startsWith('PUT')).map((c) => c.body[0].subname), ['*.home', 'home']);
 
   const doo = fakeFetch({
     'GET /v2/domains/home.example.com': () => [404, {}],
@@ -99,16 +109,17 @@ test('Hetzner, deSEC, DigitalOcean, Porkbun: create the record', async () => {
     'POST /v2/domains/example.com/records': () => [201, {}],
   });
   assert.equal((await upsertRecord({ domain: 'home.example.com', provider: 'digitalocean', credentials: { auth_token: 'T' }, ip: '10.0.0.2', fetchFn: doo })).action, 'created');
-  assert.deepEqual(doo.calls.at(-1).body, { type: 'A', name: '*.home', data: '10.0.0.2', ttl: 300 });
+  assert.deepEqual(doo.calls.filter((c) => c.key.startsWith('POST')).map((c) => c.body.name), ['*.home', 'home']);
 
   const pb = fakeFetch({
     'POST /api/json/v3/dns/retrieve/home.example.com': () => [400, { status: 'ERROR', message: 'Invalid domain.' }],
     'POST /api/json/v3/dns/retrieve/example.com': () => [200, { status: 'SUCCESS', records: [] }],
     'POST /api/json/v3/dns/retrieveByNameType/example.com/A/*.home': () => [200, { status: 'SUCCESS', records: [] }],
+    'POST /api/json/v3/dns/retrieveByNameType/example.com/A/home': () => [200, { status: 'SUCCESS', records: [] }],
     'POST /api/json/v3/dns/create/example.com': () => [200, { status: 'SUCCESS', id: 1 }],
   });
   assert.equal((await upsertRecord({ domain: 'home.example.com', provider: 'porkbun', credentials: { api_key: 'a', api_secret_key: 's' }, ip: '10.0.0.2', fetchFn: pb })).action, 'created');
-  assert.equal(pb.calls.at(-1).body.name, '*.home');
+  assert.deepEqual(pb.calls.filter((c) => c.key.includes('/dns/create/')).map((c) => c.body.name), ['*.home', 'home']);
   assert.equal(pb.calls.at(-1).body.apikey, 'a');
 });
 
@@ -133,4 +144,13 @@ test('check: providers without an API client fall back to a DNS lookup', async (
   assert.equal(r.inUse, true);
   const free = await checkDomain({ domain: 'home.example.com', provider: 'ovh', credentials: {}, serverIp: '192.168.1.5', lookupFn: async () => [] });
   assert.equal(free.inUse, false);
+});
+
+test('apex of a zone: empty relative names where the API wants them', async () => {
+  const f = fakeFetch({
+    'GET /dnszone': () => [200, { Items: [{ Id: 7, Domain: 'example.com', Records: [] }] }],
+    'PUT /dnszone/7/records': () => [201, {}],
+  });
+  await upsertRecord({ domain: 'example.com', provider: 'bunny', credentials: { access_key: 'K' }, ip: '10.0.0.2', fetchFn: f });
+  assert.deepEqual(f.calls.filter((c) => c.key.startsWith('PUT')).map((c) => c.body.Name), ['*', '']);
 });

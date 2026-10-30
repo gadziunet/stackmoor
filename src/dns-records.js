@@ -279,40 +279,52 @@ export async function lookup(name, servers = ['1.1.1.1', '8.8.8.8']) {
 /** A random name under the domain, answered by *.domain if that exists. */
 export const probeName = (domain) => `stackmoor-check-${randomBytes(4).toString('hex')}.${domain}`;
 
+/** The names the panel manages: the domain itself and every name under it. */
+export const recordNames = (domain) => [`*.${domain}`, domain];
+
 /**
- * Before saving: can we use the provider's API, and does *.domain already point somewhere?
- * Never changes anything.
+ * Before saving: can we use the provider's API, and do the domain or *.domain already
+ * point somewhere? Never changes anything.
  */
 export async function checkDomain({ domain, provider, credentials, serverIp, fetchFn = fetch, lookupFn = lookup }) {
-  const fqdn = `*.${domain}`;
-  const out = { supported: supportsAutoRecord(provider), api: null, zone: null, existing: [], source: 'dns' };
+  const out = { supported: supportsAutoRecord(provider), api: null, zone: null, existing: [], records: {}, source: 'dns' };
   if (out.supported && provider !== 'duckdns') {
     try {
       const client = CLIENTS[provider](credentials || {}, fetchFn);
       out.zone = await client.zone(domain);
-      out.existing = await client.get(out.zone, fqdn);
+      for (const name of recordNames(domain)) out.records[name] = await client.get(out.zone, name);
       out.source = 'api';
       out.api = { ok: true };
     } catch (err) {
       out.api = { ok: false, kind: err.kind || 'api', message: err.message };
     }
   }
-  if (out.source === 'dns') out.existing = await lookupFn(probeName(domain));
+  if (out.source === 'dns') {
+    out.records = { [`*.${domain}`]: await lookupFn(probeName(domain)), [domain]: await lookupFn(domain) };
+  }
+  out.existing = [...new Set(Object.values(out.records).flat())];
   out.inUse = out.existing.length > 0 && !(serverIp && out.existing.every((ip) => ip === serverIp));
   return out;
 }
 
-/** Creates or updates *.domain → ip. Returns 'created' | 'updated' | 'unchanged'. */
+/**
+ * Creates or updates the domain and *.domain → ip.
+ * Returns { action, zone, names } – action: 'created' | 'updated' | 'unchanged' (the "biggest" change).
+ */
 export async function upsertRecord({ domain, provider, credentials, ip, fetchFn = fetch }) {
   if (!supportsAutoRecord(provider)) throw new DnsApiError('unsupported');
   const client = CLIENTS[provider](credentials || {}, fetchFn);
-  const fqdn = `*.${domain}`;
   const zone = await client.zone(domain);
-  if (provider !== 'duckdns') {
-    const now = await client.get(zone, fqdn);
-    if (now.length === 1 && now[0] === ip) return { action: 'unchanged', zone };
+  // DuckDNS has one address per name and answers for everything below it.
+  if (provider === 'duckdns') return { action: await client.set(zone, domain, ip), zone, names: recordNames(domain) };
+  const rank = { unchanged: 0, updated: 1, created: 2 };
+  let action = 'unchanged';
+  for (const name of recordNames(domain)) {
+    const now = await client.get(zone, name);
+    const a = now.length === 1 && now[0] === ip ? 'unchanged' : await client.set(zone, name, ip);
+    if (rank[a] > rank[action]) action = a;
   }
-  return { action: await client.set(zone, fqdn, ip), zone };
+  return { action, zone, names: recordNames(domain) };
 }
 
 export const isIPv4 = (v) => /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/.test(String(v || ''));

@@ -63,7 +63,7 @@ Stack można utworzyć w istniejącym folderze bez `compose.yaml`, więc dane mo
 Każdy stack może dostać adres typu `chmura.dom.example.com` z prawdziwym certyfikatem HTTPS – bez pamiętania portów i bez wystawiania serwera do internetu.
 
 1. **Zaraz po instalacji** (albo później w **Ustawieniach → Domeny**): wpisz domenę, wybierz dostawcę DNS (Cloudflare, Bunny, OVHcloud, Hetzner, DigitalOcean, Porkbun, Namecheap, GoDaddy, IONOS, netcup, Gandi, AWS Route 53, deSEC, DuckDNS) i wklej klucz API. Klucze są zapisywane w formie zaszyfrowanej.
-2. Rekord DNS `*.dom.example.com` → lokalny adres IP serwera **dodaje się sam** dla Cloudflare, Bunny, Hetzner, DigitalOcean, Porkbun, deSEC i DuckDNS. U pozostałych dostawców dodaj go ręcznie. Przed zapisaniem Stackmoor sprawdza klucz API i ostrzega, jeśli domena wskazuje już na inny serwer.
+2. Rekordy DNS `dom.example.com` i `*.dom.example.com` → lokalny adres IP serwera **dodają się same** dla Cloudflare, Bunny, Hetzner, DigitalOcean, Porkbun, deSEC i DuckDNS (u pozostałych dostawców dodaj je ręcznie). Adres IP serwera jest wykrywany automatycznie, a rekordy aktualizują się, gdy się zmieni. Przed zapisaniem Stackmoor sprawdza klucz API i ostrzega, jeśli domena wskazuje już na inny serwer.
 3. **Stack → Domena:** wybierz subdomenę, usługę i jej port w kontenerze.
 
 Stackmoor uruchamia Caddy we własnym kontenerze (`stackmoor-caddy`) z jednym certyfikatem wildcard dla wszystkich aplikacji. Caddy aktualizuje się razem z panelem – każde wydanie ma własny obraz Caddy. Dostawcę DNS można zmienić w każdej chwili w Ustawieniach. Na Unraid porty 80/443 zajmuje jego panel – wybierz inne w sekcji *Zaawansowane*.

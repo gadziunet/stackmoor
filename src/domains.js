@@ -6,7 +6,7 @@ import { docker, parseJsonLines } from './docker.js';
 import { getState, setState } from './db.js';
 import { UserError } from './errors.js';
 import { encrypt, decrypt, mask } from './secrets.js';
-import { PROVIDERS, providerById, providerJson } from './dns-providers.js';
+import { PROVIDERS, providerById, providerJson, defaultPropagation } from './dns-providers.js';
 import { publishedPorts, findConflicts } from './ports.js';
 import { certErrors } from './caddy-logs.js';
 import { VERSION, isSemver } from './version.js';
@@ -76,9 +76,13 @@ export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings
       panelDomainOnly: Boolean(s.panelDomainOnly && s.domain && s.panelSubdomain),
       panelUrl: panelUrl(s),
       serverIp: s.serverIp,
+      serverIpAuto: s.serverIpAuto !== false,
+      detectedIp,
+      ipChange: recentIpChange(),
       autoDnsRecord: s.autoDnsRecord !== false,
+      propagationSeconds: s.propagationSeconds,
       credentials: masked,
-      providers: PROVIDERS.map(({ id, name, fields, help }) => ({ id, name, fields, help, autoRecord: supportsAutoRecord(id) })),
+      providers: PROVIDERS.map(({ id, name, fields, help }) => ({ id, name, fields, help, autoRecord: supportsAutoRecord(id), propagation: defaultPropagation(id) })),
     };
   }
 
@@ -128,12 +132,80 @@ export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings
     const serverIp = String(body.serverIp ?? saved.serverIp ?? '').trim();
     if (serverIp && !isIPv4(serverIp)) throw new UserError('dns.badServerIp', { ip: serverIp });
     const autoDnsRecord = body.autoDnsRecord === undefined ? saved.autoDnsRecord !== false : Boolean(body.autoDnsRecord);
+    const serverIpAuto = body.serverIpAuto === undefined ? saved.serverIpAuto !== false : Boolean(body.serverIpAuto);
+    let propagationSeconds = body.propagationSeconds === undefined ? saved.propagationSeconds : body.propagationSeconds;
+    if (propagationSeconds === '' || propagationSeconds === null) propagationSeconds = null;
+    else {
+      propagationSeconds = Number(propagationSeconds);
+      if (!Number.isInteger(propagationSeconds) || propagationSeconds < 0 || propagationSeconds > 3600) throw new UserError('dns.badPropagation');
+    }
     setState(db, 'dns.credentials', encrypt(next));
     const panelDomainOnly = Boolean(body.panelDomainOnly ?? saved.panelDomainOnly) && Boolean(domain && panelSubdomain);
     if (panelDomainOnly && String(currentHost).toLowerCase() !== `${panelSubdomain}.${domain}`) {
       throw new UserError('dns.lockNeedsDomain', { url: `https://${panelSubdomain}.${domain}` });
     }
-    saveSettings({ domain, dnsProvider: provider, acmeEmail: email, httpPort, httpsPort, panelSubdomain, panelDomainOnly, serverIp, autoDnsRecord });
+    saveSettings({ domain, dnsProvider: provider, acmeEmail: email, httpPort, httpsPort, panelSubdomain, panelDomainOnly, serverIp, autoDnsRecord, serverIpAuto, propagationSeconds });
+  }
+
+  /** Seconds to wait after adding the TXT record (own setting, else the provider's default). */
+  function propagation(s = getSettings()) {
+    return s.propagationSeconds === null || s.propagationSeconds === undefined ? defaultPropagation(s.dnsProvider) : Number(s.propagationSeconds);
+  }
+
+  // ---------- this server's IP address ----------
+
+  // The panel runs in a container and can't see the server's network. A one-second
+  // helper container (the panel's own image) on the host network asks the system which
+  // address it uses to reach the internet – that is the server's address in the LAN.
+  const IP_SCRIPT = "const s=require('dgram').createSocket('udp4');s.on('error',()=>process.exit(1));"
+    + "s.connect(53,'1.1.1.1',()=>{console.log(s.address().address);s.close()})";
+  let detectedIp = '';
+  async function detectServerIp() {
+    let out = '';
+    const me = await docker(['inspect', '--format', '{{.Image}}', os.hostname()]);
+    if (me.code === 0 && me.stdout.trim()) {
+      const r = await docker(['run', '--rm', '--network', 'host', '--log-driver', 'none', '--entrypoint', 'node', me.stdout.trim(), '-e', IP_SCRIPT]);
+      if (r.code === 0) out = r.stdout.trim().split('\n').pop();
+    } else {
+      // Not in a container (development): this process already sees the host's network.
+      const dgram = await import('node:dgram');
+      out = await new Promise((resolve) => {
+        const s = dgram.createSocket('udp4');
+        s.on('error', () => resolve(''));
+        s.connect(53, '1.1.1.1', () => { const a = s.address().address; s.close(); resolve(a); });
+      });
+    }
+    if (isIPv4(out) && out !== '0.0.0.0') detectedIp = out;
+    return detectedIp;
+  }
+
+  function recentIpChange() {
+    const c = getState(db, 'dns.ipChange');
+    return c && Date.now() - Date.parse(c.at) < 7 * 24 * 3600e3 ? c : null;
+  }
+
+  /** On start: has the server's address changed? Then save it and update the DNS record. */
+  async function syncServerIp(t) {
+    const s = getSettings();
+    if (!s.domain || s.serverIpAuto === false) return null;
+    const ip = await detectServerIp();
+    if (!ip || ip === s.serverIp) return null;
+    saveSettings({ serverIp: ip });
+    let log = '';
+    const rec = s.serverIp ? await ensureRecord((x) => { log += x; }, t) : null;
+    if (s.serverIp) setState(db, 'dns.ipChange', { from: s.serverIp, to: ip, at: new Date().toISOString(), record: rec?.action || null });
+    return { from: s.serverIp, to: ip, record: rec?.action || null, log };
+  }
+
+  /** "Get the certificate again": restarting Caddy makes it start a fresh attempt right away. */
+  async function retryCertificate() {
+    if (!getSettings().domain) throw new UserError('dns.noDomain');
+    writeFile(path.join(caddyDir, 'config', 'caddy.json'), JSON.stringify(await buildConfig(), null, 2), 0o600);
+    const r = await docker(['restart', CADDY]);
+    if (r.code !== 0) throw new UserError('step.exitCode', { code: r.code });
+    await refreshCaddyIp();
+    setState(db, 'caddy.retryAt', new Date().toISOString());
+    return { ok: true };
   }
 
   /** Credentials from the form; empty secret fields keep the saved value (the UI only shows a mask). */
@@ -175,10 +247,10 @@ export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings
     if (!s.domain || !s.serverIp || s.autoDnsRecord === false || !supportsAutoRecord(s.dnsProvider)) return null;
     try {
       const r = await upsertRecord({ domain: s.domain, provider: s.dnsProvider, credentials: credentials(), ip: s.serverIp });
-      log(t(`dns.log.record.${r.action}`, { name: `*.${s.domain}`, ip: s.serverIp }) + '\n');
+      log(t(`dns.log.record.${r.action}`, { name: `${s.domain}, *.${s.domain}`, ip: s.serverIp }) + '\n');
       return r;
     } catch (err) {
-      log(t('dns.log.recordFailed', { name: `*.${s.domain}`, reason: t(`dns.apiError.${err.kind || 'api'}`, { message: err.message }) }) + '\n');
+      log(t('dns.log.recordFailed', { name: `${s.domain}, *.${s.domain}`, reason: t(`dns.apiError.${err.kind || 'api'}`, { message: err.message }) }) + '\n');
       return null;
     }
   }
@@ -315,7 +387,11 @@ export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings
         challenges: {
           dns: {
             provider: providerJson(s.dnsProvider, credentials()),
-            ...(providerById(s.dnsProvider)?.propagationDelay ? { propagation_delay: providerById(s.dnsProvider).propagationDelay } : {}),
+            // Like "Propagation seconds" in Nginx Proxy Manager: wait before Let's Encrypt checks,
+            // and only ask once public DNS really shows the TXT record (up to 10 minutes).
+            ...(propagation(s) > 0 ? { propagation_delay: `${propagation(s)}s` } : {}),
+            propagation_timeout: '10m',
+            resolvers: ['1.1.1.1', '8.8.8.8'],
           },
         },
       };
@@ -330,19 +406,28 @@ export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings
           servers: {
             stackmoor: {
               listen: [':443'],
-              routes: hostRoutes.map((r) => ({
-                match: [{ host: [r.host] }],
-                handle: [{ handler: 'reverse_proxy', upstreams: [{ dial: r.dial }] }],
-                terminal: true,
-              })),
+              routes: [
+                ...hostRoutes.map((r) => ({
+                  match: [{ host: [r.host] }],
+                  handle: [{ handler: 'reverse_proxy', upstreams: [{ dial: r.dial }] }],
+                  terminal: true,
+                })),
+                // The bare domain leads to the panel (when it has an address).
+                ...(s.panelSubdomain ? [{
+                  match: [{ host: [s.domain] }],
+                  handle: [{ handler: 'static_response', status_code: 302, headers: { Location: [panelUrl(s)] } }],
+                  terminal: true,
+                }] : []),
+              ],
             },
           },
         },
         // One wildcard certificate covers every app: Caddy skips per-host certificates
         // for names covered by a managed wildcard (default since Caddy 2.10).
         tls: {
-          certificates: { automate: [`*.${s.domain}`] },
-          automation: { policies: [{ subjects: [`*.${s.domain}`], issuers: [issuer] }] },
+          // The wildcard does not cover the bare domain itself, so it gets its own certificate.
+          certificates: { automate: [`*.${s.domain}`, s.domain] },
+          automation: { policies: [{ subjects: [`*.${s.domain}`, s.domain], issuers: [issuer] }] },
         },
       },
     };
@@ -507,11 +592,16 @@ export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings
     }
     const img = getState(db, 'caddy.image');
     const imageProblem = img && !img.ok && img.image === image ? image : null;
-    return { enabled: true, running, certificate, errors, domain: s.domain, panelUrl: panelUrl(s), imageProblem };
+    return {
+      enabled: true, running, certificate, errors, domain: s.domain, panelUrl: panelUrl(s), imageProblem,
+      propagation: s.dnsProvider === 'internal' ? 0 : propagation(s),
+      checkedAt: new Date().toISOString(),
+    };
   }
 
   return {
     publicConfig, saveConfig, check, routes, setRoutes, removeStack, writeOverride, apply, status, buildConfig,
-    panelUrl, refreshCaddyIp, attachSelf, savePanel, reloadConfig, syncImage, caddyIp: () => caddyIp,
+    panelUrl, refreshCaddyIp, attachSelf, savePanel, reloadConfig, syncImage, detectServerIp, syncServerIp, retryCertificate,
+    caddyIp: () => caddyIp,
   };
 }

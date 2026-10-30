@@ -61,6 +61,7 @@ app.use(i18nMiddleware);
 
 // ---------- panel only through its domain ----------
 domains.attachSelf().catch(() => {})
+  .then(() => domains.syncServerIp((key, vars) => translate(lastLang, key, vars))).catch(() => {})
   .then(() => domains.syncImage()).catch(() => {})
   .then(() => domains.refreshCaddyIp()).catch(() => {});
 // Caddy follows the panel version; retry now and then in case its image was published later.
@@ -343,16 +344,28 @@ app.post('/api/backups/restore', wrap(async (req, res) => {
 
 // ---------- domains ----------
 
+// The server's IP: detected automatically unless switched off; the address the browser
+// used is the fallback guess.
+const withTimeout = (p, ms) => Promise.race([p, new Promise((r) => setTimeout(() => r(''), ms))]);
+async function serverIpFor(body, req) {
+  if (!body.domain || body.serverIpAuto === false) return body;
+  const ip = await withTimeout(domains.detectServerIp().catch(() => ''), 10_000);
+  return { ...body, serverIp: ip || body.serverIp || (isPrivateIPv4(req.hostname) ? req.hostname : '') };
+}
+
 app.get('/api/domains', wrap(async (req, res) => {
-  // The address the browser used is a good guess for this server's local IP.
   const suggestedIp = isPrivateIPv4(req.hostname) ? req.hostname : '';
-  res.json({ ...domains.publicConfig(), suggestedIp, status: await domains.status() });
+  const cfg = domains.publicConfig();
+  if (cfg.serverIpAuto && !cfg.detectedIp) cfg.detectedIp = await withTimeout(domains.detectServerIp().catch(() => ''), 10_000);
+  res.json({ ...cfg, suggestedIp, status: await domains.status() });
 }));
 
-app.post('/api/domains/check', wrap(async (req, res) => res.json(await domains.check(req.body || {}))));
+app.post('/api/domains/check', wrap(async (req, res) => res.json(await domains.check(await serverIpFor(req.body || {}, req)))));
+
+app.post('/api/domains/retry-cert', wrap(async (_req, res) => res.json(await domains.retryCertificate())));
 
 app.put('/api/domains', wrap(async (req, res) => {
-  domains.saveConfig(req.body || {}, req.hostname);
+  domains.saveConfig(await serverIpFor(req.body || {}, req), req.hostname);
   res.json(domains.publicConfig());
 }));
 

@@ -74,6 +74,8 @@ export const DEFAULT_SETTINGS = {
   panelDomainOnly: false, // true: opening the panel by IP redirects to the panel's domain
   serverIp: '',          // this server's address in the local network, for the *.<domain> record
   autoDnsRecord: true,   // create/update *.<domain> → serverIp through the DNS provider's API
+  serverIpAuto: true,    // detect serverIp when the panel starts (and when the domain is saved)
+  propagationSeconds: null, // wait after adding the TXT record; null = the provider's default
 };
 
 export function openDb(file) {
