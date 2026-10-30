@@ -72,6 +72,8 @@ export const DEFAULT_SETTINGS = {
   httpsPort: 443,
   panelSubdomain: '',    // e.g. "stackmoor" -> the panel itself at stackmoor.<domain>
   panelDomainOnly: false, // true: opening the panel by IP redirects to the panel's domain
+  serverIp: '',          // this server's address in the local network, for the *.<domain> record
+  autoDnsRecord: true,   // create/update *.<domain> → serverIp through the DNS provider's API
 };
 
 export function openDb(file) {

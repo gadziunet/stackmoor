@@ -53,8 +53,8 @@ Automatic volumes can be turned off per stack.
 
 Give every stack an address like `cloud.home.example.com` with a real HTTPS certificate – no ports to remember, and the server does not have to be reachable from the internet.
 
-1. **Settings → Domains:** enter your domain, pick your DNS provider (Cloudflare, Bunny, OVHcloud, Hetzner, DigitalOcean, Porkbun, Namecheap, GoDaddy, IONOS, netcup, Gandi, AWS Route 53, deSEC, DuckDNS) and paste its API key. Keys are stored encrypted.
-2. In your DNS create an A record `*.home.example.com` → the server's IP (a local IP is fine).
+1. **Right after installing** (or later in **Settings → Domains**): enter your domain, pick your DNS provider (Cloudflare, Bunny, OVHcloud, Hetzner, DigitalOcean, Porkbun, Namecheap, GoDaddy, IONOS, netcup, Gandi, AWS Route 53, deSEC, DuckDNS) and paste its API key. Keys are stored encrypted.
+2. The DNS record `*.home.example.com` → the server's local IP is **added automatically** for Cloudflare, Bunny, Hetzner, DigitalOcean, Porkbun, deSEC and DuckDNS. With other providers, add it by hand. Before saving, Stackmoor checks the API key and warns if the domain already points to another server.
 3. **Stack → Domain:** choose a subdomain, the service and its port inside the container.
 
 Stackmoor runs Caddy in its own container (`stackmoor-caddy`) with one wildcard certificate for all apps. Caddy is updated together with the panel – each release ships its own Caddy image. The DNS provider can be changed any time in Settings. On Unraid, ports 80/443 are used by its web UI – choose other ports under *Advanced*.
@@ -86,9 +86,9 @@ docker exec stackmoor node src/cli.js unlock
 - [x] Cloudron-style backups – per stack, automatically before updates, database dumps, schedule, retention, encryption; restic to S3 / Backblaze B2; restore and clone
 - [x] Setup wizard: fresh install or restore a whole server from a backup
 - [x] Updates: check for new Stackmoor versions and new stack images (on/off in Settings), show what is new and update only after confirmation
-- [ ] Notifications (e-mail, Telegram, ntfy, Pushover, webhooks)
+- [x] Setup wizard: start with the IP address or set up the domain right away; the DNS record is added through the provider's API and the domain is checked first
 - [ ] VPN (WireGuard) for chosen stacks – e.g. reach your servers from a fixed address
-- [ ] Setup wizard: start with the IP address or set up the domain right away
+- [ ] Notifications (e-mail, Telegram, ntfy, Pushover, webhooks)
 - [ ] Unraid Community Apps template
 
 ## Development

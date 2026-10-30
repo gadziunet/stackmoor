@@ -62,8 +62,8 @@ Stack można utworzyć w istniejącym folderze bez `compose.yaml`, więc dane mo
 
 Każdy stack może dostać adres typu `chmura.dom.example.com` z prawdziwym certyfikatem HTTPS – bez pamiętania portów i bez wystawiania serwera do internetu.
 
-1. **Ustawienia → Domeny:** wpisz domenę, wybierz dostawcę DNS (Cloudflare, Bunny, OVHcloud, Hetzner, DigitalOcean, Porkbun, Namecheap, GoDaddy, IONOS, netcup, Gandi, AWS Route 53, deSEC, DuckDNS) i wklej klucz API. Klucze są zapisywane w formie zaszyfrowanej.
-2. W DNS utwórz rekord A `*.dom.example.com` → adres IP serwera (lokalny adres jest w porządku).
+1. **Zaraz po instalacji** (albo później w **Ustawieniach → Domeny**): wpisz domenę, wybierz dostawcę DNS (Cloudflare, Bunny, OVHcloud, Hetzner, DigitalOcean, Porkbun, Namecheap, GoDaddy, IONOS, netcup, Gandi, AWS Route 53, deSEC, DuckDNS) i wklej klucz API. Klucze są zapisywane w formie zaszyfrowanej.
+2. Rekord DNS `*.dom.example.com` → lokalny adres IP serwera **dodaje się sam** dla Cloudflare, Bunny, Hetzner, DigitalOcean, Porkbun, deSEC i DuckDNS. U pozostałych dostawców dodaj go ręcznie. Przed zapisaniem Stackmoor sprawdza klucz API i ostrzega, jeśli domena wskazuje już na inny serwer.
 3. **Stack → Domena:** wybierz subdomenę, usługę i jej port w kontenerze.
 
 Stackmoor uruchamia Caddy we własnym kontenerze (`stackmoor-caddy`) z jednym certyfikatem wildcard dla wszystkich aplikacji. Caddy aktualizuje się razem z panelem – każde wydanie ma własny obraz Caddy. Dostawcę DNS można zmienić w każdej chwili w Ustawieniach. Na Unraid porty 80/443 zajmuje jego panel – wybierz inne w sekcji *Zaawansowane*.
@@ -95,9 +95,9 @@ docker exec stackmoor node src/cli.js unlock
 - [x] Backupy jak w Cloudronie – per stack, automatycznie przed aktualizacją, dumpy baz, harmonogram, retencja, szyfrowanie; restic do S3 / Backblaze B2; przywracanie i klonowanie
 - [x] Kreator: nowa instalacja albo przywrócenie całego serwera z kopii
 - [x] Aktualizacje: sprawdzanie nowych wersji Stackmoor i nowych obrazów stacków (włączane w Ustawieniach), pokazanie co nowego i aktualizacja dopiero po potwierdzeniu
-- [ ] Powiadomienia (e-mail, Telegram, ntfy, Pushover, webhooki)
+- [x] Kreator: start po adresie IP albo od razu z domeną; rekord DNS dodaje się przez API dostawcy, a domena jest najpierw sprawdzana
 - [ ] VPN (WireGuard) dla wybranych stacków – np. łączenie z serwerami ze stałego adresu
-- [ ] Kreator: start po adresie IP albo od razu z domeną
+- [ ] Powiadomienia (e-mail, Telegram, ntfy, Pushover, webhooki)
 - [ ] Szablon Unraid w Community Apps
 
 ## Rozwój

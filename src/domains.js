@@ -10,6 +10,7 @@ import { PROVIDERS, providerById, providerJson } from './dns-providers.js';
 import { publishedPorts, findConflicts } from './ports.js';
 import { certErrors } from './caddy-logs.js';
 import { VERSION, isSemver } from './version.js';
+import { checkDomain, upsertRecord, supportsAutoRecord, isIPv4 } from './dns-records.js';
 
 // Local domains: one Caddy container ("stackmoor-caddy") in front of all stacks.
 // - It holds one wildcard certificate (*.domain) obtained through the DNS provider's API,
@@ -74,8 +75,10 @@ export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings
       panelSubdomain: s.panelSubdomain,
       panelDomainOnly: Boolean(s.panelDomainOnly && s.domain && s.panelSubdomain),
       panelUrl: panelUrl(s),
+      serverIp: s.serverIp,
+      autoDnsRecord: s.autoDnsRecord !== false,
       credentials: masked,
-      providers: PROVIDERS.map(({ id, name, fields, help }) => ({ id, name, fields, help })),
+      providers: PROVIDERS.map(({ id, name, fields, help }) => ({ id, name, fields, help, autoRecord: supportsAutoRecord(id) })),
     };
   }
 
@@ -121,24 +124,63 @@ export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings
     const email = String(body.acmeEmail ?? '').trim();
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new UserError('dns.badEmail');
 
-    // Credentials: empty secret fields keep the saved value (the UI only shows a mask).
-    const p = providerById(provider);
-    const old = credentials();
-    const next = {};
-    for (const f of p?.fields || []) {
-      let v = String(body.credentials?.[f.key] ?? '').trim();
-      if (f.secret && (v === '' || v.startsWith('••••••'))) v = old[f.key] || '';
-      if (/[\n\r]/.test(v)) throw new UserError('dns.badValue', { field: f.label });
-      if (!v && f.default !== undefined) v = f.default;
-      if (domain && f.required && !v) throw new UserError('dns.missingField', { field: f.label });
-      if (v) next[f.key] = v;
-    }
+    const next = mergeCredentials(provider, body.credentials, Boolean(domain));
+    const serverIp = String(body.serverIp ?? saved.serverIp ?? '').trim();
+    if (serverIp && !isIPv4(serverIp)) throw new UserError('dns.badServerIp', { ip: serverIp });
+    const autoDnsRecord = body.autoDnsRecord === undefined ? saved.autoDnsRecord !== false : Boolean(body.autoDnsRecord);
     setState(db, 'dns.credentials', encrypt(next));
     const panelDomainOnly = Boolean(body.panelDomainOnly ?? saved.panelDomainOnly) && Boolean(domain && panelSubdomain);
     if (panelDomainOnly && String(currentHost).toLowerCase() !== `${panelSubdomain}.${domain}`) {
       throw new UserError('dns.lockNeedsDomain', { url: `https://${panelSubdomain}.${domain}` });
     }
-    saveSettings({ domain, dnsProvider: provider, acmeEmail: email, httpPort, httpsPort, panelSubdomain, panelDomainOnly });
+    saveSettings({ domain, dnsProvider: provider, acmeEmail: email, httpPort, httpsPort, panelSubdomain, panelDomainOnly, serverIp, autoDnsRecord });
+  }
+
+  /** Credentials from the form; empty secret fields keep the saved value (the UI only shows a mask). */
+  function mergeCredentials(provider, given, required) {
+    const p = providerById(provider);
+    const old = credentials();
+    const next = {};
+    for (const f of p?.fields || []) {
+      let v = String(given?.[f.key] ?? '').trim();
+      if (f.secret && (v === '' || v.startsWith('••••••'))) v = old[f.key] || '';
+      if (/[\n\r]/.test(v)) throw new UserError('dns.badValue', { field: f.label });
+      if (!v && f.default !== undefined) v = f.default;
+      if (required && f.required && !v) throw new UserError('dns.missingField', { field: f.label });
+      if (v) next[f.key] = v;
+    }
+    return next;
+  }
+
+  /**
+   * Before saving: does the provider's API work with these credentials, and is *.domain
+   * already pointing somewhere else? Changes nothing.
+   */
+  async function check(body) {
+    const domain = String(body.domain ?? '').trim().toLowerCase().replace(/^\*\./, '').replace(/\.$/, '');
+    if (!DOMAIN_RE.test(domain)) throw new UserError('dns.badDomain', { domain });
+    const provider = String(body.dnsProvider || '');
+    if (provider !== 'internal' && !providerById(provider)) throw new UserError('dns.badProvider');
+    const serverIp = String(body.serverIp ?? '').trim();
+    if (serverIp && !isIPv4(serverIp)) throw new UserError('dns.badServerIp', { ip: serverIp });
+    const creds = provider === 'internal' ? {} : mergeCredentials(provider, body.credentials, true);
+    const r = await checkDomain({ domain, provider, credentials: creds, serverIp });
+    // Our own record from before (same domain, same IP) is not "in use".
+    return { domain, ...r };
+  }
+
+  /** *.domain → serverIp through the provider's API (when supported and switched on). */
+  async function ensureRecord(log, t) {
+    const s = getSettings();
+    if (!s.domain || !s.serverIp || s.autoDnsRecord === false || !supportsAutoRecord(s.dnsProvider)) return null;
+    try {
+      const r = await upsertRecord({ domain: s.domain, provider: s.dnsProvider, credentials: credentials(), ip: s.serverIp });
+      log(t(`dns.log.record.${r.action}`, { name: `*.${s.domain}`, ip: s.serverIp }) + '\n');
+      return r;
+    } catch (err) {
+      log(t('dns.log.recordFailed', { name: `*.${s.domain}`, reason: t(`dns.apiError.${err.kind || 'api'}`, { message: err.message }) }) + '\n');
+      return null;
+    }
   }
 
   /** Panel address and IP lock only – needs just a config reload, not a Caddy restart. */
@@ -343,6 +385,7 @@ export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings
     }
     if (!s.dnsProvider) throw new UserError('dns.badProvider');
 
+    await ensureRecord(log, t);
     await ensureNetwork();
     writeFile(path.join(caddyDir, 'compose.yaml'), stringify(caddyCompose(s)));
     // The JSON holds the DNS API key, so only root may read it.
@@ -468,7 +511,7 @@ export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings
   }
 
   return {
-    publicConfig, saveConfig, routes, setRoutes, removeStack, writeOverride, apply, status, buildConfig,
+    publicConfig, saveConfig, check, routes, setRoutes, removeStack, writeOverride, apply, status, buildConfig,
     panelUrl, refreshCaddyIp, attachSelf, savePanel, reloadConfig, syncImage, caddyIp: () => caddyIp,
   };
 }

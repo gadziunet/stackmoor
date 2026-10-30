@@ -170,11 +170,90 @@ function renderAuth() {
     const body = { username: document.getElementById('u').value, password: document.getElementById('p').value };
     try {
       await api('POST', setup ? '/api/setup' : '/api/login', body);
+      if (setup) state.afterSetup = true; // next: how to open the panel (IP or domain)
       await boot();
     } catch (err) {
       document.getElementById('err').innerHTML = errorBox(err);
     }
   });
+}
+
+// ---------- first run: IP address for now, or the domain right away ----------
+
+async function renderAccessStep() {
+  const here = `${location.protocol}//${location.host}`;
+  app.innerHTML = `
+    <div class="auth"><div class="card wide" id="access">
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <img src="/logo.svg" alt="Stackmoor" width="52" height="52">${langSelect('auth-lang')}
+      </div>
+      <h1>${t('acc2.title')}</h1>
+      <p>${t('acc2.lead')}</p>
+      <div class="choices">
+        <button type="button" class="choice" id="acc-ip">
+          <strong>${t('acc2.ip')}</strong>
+          <span>${t('acc2.ipHint', { url: esc(here) })}</span>
+        </button>
+        <button type="button" class="choice" id="acc-domain">
+          <strong>${t('acc2.domain')}</strong>
+          <span>${t('acc2.domainHint')}</span>
+        </button>
+      </div>
+      <div id="acc-body"></div>
+    </div></div>`;
+  bindLangSelect('auth-lang');
+  const finish = () => { state.afterSetup = false; location.hash = '#/'; render(); };
+  document.getElementById('acc-ip').addEventListener('click', finish);
+  document.getElementById('acc-domain').addEventListener('click', async () => {
+    document.querySelector('#access .choices').hidden = true;
+    const bodyEl = document.getElementById('acc-body');
+    bodyEl.innerHTML = `<p class="hint">${t('stack.loading')}</p>`;
+    let d;
+    try {
+      d = await api('GET', '/api/domains');
+    } catch (err) {
+      bodyEl.innerHTML = errorBox(err);
+      return;
+    }
+    bodyEl.innerHTML = `<p class="hint">${t('dom.lead')}</p><div id="acc-form"></div>
+      <button type="button" class="btn" id="acc-skip" style="margin-top:12px">${t('acc2.later')}</button>`;
+    document.getElementById('acc-skip').addEventListener('click', finish);
+    domainForm(document.getElementById('acc-form'), d, {
+      submitLabel: t('acc2.submit'),
+      onApplied: () => {
+        document.getElementById('acc-skip')?.remove();
+        waitForCertificate(bodyEl, finish);
+      },
+    });
+  });
+}
+
+/** After the wizard set up the domain: wait for the certificate, then offer the new address. */
+async function waitForCertificate(el, finish) {
+  const box = document.createElement('div');
+  box.className = 'notice info';
+  box.style.marginTop = '14px';
+  box.innerHTML = `<strong>${t('acc2.waitCert')}</strong><p class="hint" style="margin:6px 0 0">${t('acc2.waitCertHint')}</p>`;
+  el.appendChild(box);
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  const started = Date.now();
+  for (;;) {
+    const st = await api('GET', '/api/domains/status').catch(() => null);
+    const done = st?.certificate;
+    if (done || Date.now() - started > 4 * 60e3) {
+      const url = st?.panelUrl || '';
+      box.innerHTML = done
+        ? `<strong>✓ ${t('acc2.ready')}</strong>
+           ${url ? `<p class="hint" style="margin:6px 0 10px">${t('acc2.readyHint', { url: esc(url) })}</p>
+             <a class="btn primary" href="${esc(url)}">${t('acc2.open', { url: esc(url.replace('https://', '')) })}</a>` : ''}
+           <button type="button" class="btn" id="acc-stay" style="margin-left:6px">${t('acc2.stay')}</button>`
+        : `<strong>${t('acc2.slow')}</strong><p class="hint" style="margin:6px 0 10px">${t('acc2.slowHint')}</p>
+           <button type="button" class="btn" id="acc-stay">${t('acc2.continue')}</button>`;
+      box.querySelector('#acc-stay').addEventListener('click', finish);
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 4000));
+  }
 }
 
 // ---------- setup wizard: restore a whole server ----------
@@ -1100,6 +1179,151 @@ function waitForRestart() {
   }, 2000);
 }
 
+/**
+ * The local-domain form, used in Settings → Domains and in the first-run wizard.
+ * Saving first checks the domain (API key, is *.domain already pointing elsewhere?),
+ * then saves, creates the DNS record through the provider's API and starts Caddy.
+ */
+function domainForm(box, d, { onApplied, submitLabel } = {}) {
+  const providerOptions = [
+    `<option value="">${t('dom.chooseProvider')}</option>`,
+    ...d.providers.map((p) => `<option value="${esc(p.id)}" ${p.id === d.dnsProvider ? 'selected' : ''}>${esc(p.name)}</option>`),
+    `<option value="internal" ${d.dnsProvider === 'internal' ? 'selected' : ''}>${t('dom.internal')}</option>`,
+  ].join('');
+  box.innerHTML = `
+    <form id="dom-form">
+      <div class="field"><label for="dom-domain">${t('dom.domain')}</label>
+        <input type="text" id="dom-domain" value="${esc(d.domain)}" placeholder="home.example.com" autocapitalize="off" autocomplete="off">
+        <p class="hint">${t('dom.domainHint')}</p></div>
+      <div class="field"><label for="dom-provider">${t('dom.provider')}</label>
+        <select id="dom-provider" class="lang">${providerOptions}</select></div>
+      <div id="dom-fields"></div>
+      <div class="field"><label for="dom-ip">${t('dom.serverIp')}</label>
+        <input type="text" id="dom-ip" value="${esc(d.serverIp || d.suggestedIp || '')}" placeholder="192.168.1.50" inputmode="decimal" autocomplete="off">
+        <div id="dom-record"></div></div>
+      <div class="field"><label for="dom-email">${t('dom.email')} <span class="hint">${t('new.envOptional')}</span></label>
+        <input type="text" id="dom-email" value="${esc(d.acmeEmail)}" placeholder="you@example.com" autocapitalize="off"></div>
+      <details class="field"><summary>${t('dom.advanced')}</summary>
+        <div class="row" style="margin-top:10px">
+          <div style="flex:1;min-width:120px"><label for="dom-http">HTTP</label><input type="number" id="dom-http" value="${esc(d.httpPort)}"></div>
+          <div style="flex:1;min-width:120px"><label for="dom-https">HTTPS</label><input type="number" id="dom-https" value="${esc(d.httpsPort)}"></div>
+        </div>
+        <p class="hint">${t('dom.portsHint')}</p>
+      </details>
+      <div id="dom-out"></div>
+      <button class="btn primary">${submitLabel || t('dom.saveApply')}</button>
+    </form>
+    <div id="dom-op" hidden><pre class="terminal" id="dom-term"></pre></div>`;
+
+  const $ = (id) => box.querySelector(`#${id}`);
+  const provider = () => d.providers.find((x) => x.id === $('dom-provider').value);
+
+  const drawFields = () => {
+    const id = $('dom-provider').value;
+    const p = provider();
+    const fields = $('dom-fields');
+    if (id === 'internal') fields.innerHTML = `<p class="hint field">${t('dom.internalHint')}</p>`;
+    else if (!p) fields.innerHTML = '';
+    else {
+      const help = p.help?.[lang] || p.help?.en || '';
+      fields.innerHTML = `
+        ${help ? `<p class="hint field">${esc(help)}</p>` : ''}
+        ${p.fields.map((f) => {
+          const saved = id === d.dnsProvider ? d.credentials?.[f.key] || '' : '';
+          return `<div class="field"><label for="dns-${esc(f.key)}">${esc(f.label)}${f.required ? '' : ` <span class="hint">${t('new.envOptional')}</span>`}</label>
+            <input type="${f.secret ? 'password' : 'text'}" id="dns-${esc(f.key)}" data-key="${esc(f.key)}" class="dns-field"
+              value="${f.secret ? '' : esc(saved || f.default || '')}" placeholder="${esc(f.secret && saved ? saved : f.placeholder || '')}" autocomplete="off" autocapitalize="off"></div>`;
+        }).join('')}`;
+    }
+    drawRecord();
+  };
+  // Automatic *.domain record when the provider supports it; otherwise say what to add by hand.
+  const drawRecord = () => {
+    const p = provider();
+    const domain = $('dom-domain').value.trim().toLowerCase() || 'home.example.com';
+    const ip = $('dom-ip').value.trim() || '192.168.x.x';
+    const prev = $('dom-auto');
+    const auto = prev ? prev.checked : d.autoDnsRecord !== false;
+    $('dom-record').innerHTML = p?.autoRecord
+      ? `<label class="check" style="margin-top:8px"><input type="checkbox" id="dom-auto" ${auto ? 'checked' : ''}>
+          <span>${t('dom.autoRecord', { name: esc(`*.${domain}`) })}</span></label>`
+      : `<p class="hint">${t('dom.manualRecord', { name: esc(`*.${domain}`), ip: esc(ip) })}</p>`;
+  };
+  drawFields();
+  $('dom-provider').addEventListener('change', drawFields);
+  $('dom-domain').addEventListener('input', drawRecord);
+  $('dom-ip').addEventListener('input', () => { if (!provider()?.autoRecord) drawRecord(); });
+
+  const collect = () => {
+    const credentials = {};
+    box.querySelectorAll('.dns-field').forEach((el) => { credentials[el.dataset.key] = el.value; });
+    return {
+      domain: $('dom-domain').value.trim(),
+      dnsProvider: $('dom-provider').value,
+      serverIp: $('dom-ip').value.trim(),
+      autoDnsRecord: $('dom-auto') ? $('dom-auto').checked : d.autoDnsRecord !== false,
+      acmeEmail: $('dom-email').value,
+      httpPort: Number($('dom-http').value),
+      httpsPort: Number($('dom-https').value),
+      credentials,
+    };
+  };
+
+  const apply = async (payload) => {
+    const out = $('dom-out');
+    try {
+      await api('PUT', '/api/domains', payload);
+      out.innerHTML = '';
+    } catch (err) {
+      out.innerHTML = errorBox(err);
+      return;
+    }
+    const pre = $('dom-term');
+    $('dom-op').hidden = false;
+    pre.textContent = '';
+    const code = await stream('POST', '/api/domains/apply', (txt) => appendTo(pre, txt)).catch((err) => {
+      appendTo(pre, `\n${err.message}\n`);
+      return 1;
+    });
+    toast(t(code === 0 ? 'toast.done' : 'toast.failed'));
+    if (code === 0) onApplied?.(payload);
+  };
+
+  $('dom-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const out = $('dom-out');
+    const btn = e.submitter || box.querySelector('#dom-form .btn.primary');
+    const payload = collect();
+    // Turning domains off, or saving an already configured domain again: nothing to check.
+    if (!payload.domain || (payload.domain === d.domain && payload.dnsProvider === d.dnsProvider)) return apply(payload);
+    btn.disabled = true;
+    out.innerHTML = `<p class="hint">${t('dom.checking')}</p>`;
+    let c;
+    try {
+      c = await api('POST', '/api/domains/check', payload);
+    } catch (err) {
+      out.innerHTML = errorBox(err);
+      btn.disabled = false;
+      return;
+    }
+    btn.disabled = false;
+    const name = `*.${c.domain}`;
+    if (c.api && !c.api.ok) {
+      out.innerHTML = `<div class="notice error">${t(`dom.apiError.${c.api.kind}`, { message: esc(c.api.message || '') })}</div>`;
+      return;
+    }
+    if (c.inUse) {
+      out.innerHTML = `<div class="notice warn"><strong>${t('dom.inUseTitle', { name: esc(name) })}</strong>
+        <p class="hint" style="margin:6px 0 10px">${t(c.source === 'api' ? 'dom.inUseApi' : 'dom.inUseDns', { name: esc(name), ips: esc(c.existing.join(', ')) })}</p>
+        <button type="button" class="btn" id="dom-anyway">${t('dom.useAnyway')}</button></div>`;
+      $('dom-anyway').addEventListener('click', () => { out.innerHTML = ''; apply(payload); });
+      return;
+    }
+    out.innerHTML = c.api?.ok ? `<p class="hint">✓ ${t('dom.checkedApi', { zone: esc(c.zone) })}</p>` : '';
+    apply(payload);
+  });
+}
+
 async function settingsDomains(body) {
   let d;
   try {
@@ -1120,15 +1344,11 @@ async function settingsDomains(body) {
       </div>
       ${st.errors?.length ? `<div class="notice error">${st.errors.map(esc).join('\n')}</div>` : ''}
       ${st.imageProblem ? `<div class="notice info">${t('dom.caddyImageProblem', { image: esc(st.imageProblem) })}</div>` : ''}
-      <p class="hint">${t('dom.dnsRecord', { domain: esc(st.domain) })}</p>
+      <p class="hint">${d.autoDnsRecord && d.serverIp && d.providers.find((p) => p.id === d.dnsProvider)?.autoRecord
+        ? t('dom.recordAuto', { name: esc(`*.${st.domain}`), ip: esc(d.serverIp) })
+        : t('dom.dnsRecord', { domain: esc(st.domain) })}</p>
       <button type="button" class="btn small" id="dom-refresh">${t('logs.refresh')}</button>
     </div>`;
-
-  const providerOptions = [
-    `<option value="">${t('dom.chooseProvider')}</option>`,
-    ...d.providers.map((p) => `<option value="${esc(p.id)}" ${p.id === d.dnsProvider ? 'selected' : ''}>${esc(p.name)}</option>`),
-    `<option value="internal" ${d.dnsProvider === 'internal' ? 'selected' : ''}>${t('dom.internal')}</option>`,
-  ].join('');
 
   const panelBox = !d.domain ? '' : `
     <form class="card" id="panel-form">
@@ -1147,50 +1367,14 @@ async function settingsDomains(body) {
   body.innerHTML = `
     ${panelBox}
     ${statusBox}
-    <form class="card" id="dom-form">
+    <div class="card">
       <h2>${t('dom.title')}</h2>
       <p class="hint" style="margin-top:-4px">${t('dom.lead')}</p>
-      <div class="field"><label for="dom-domain">${t('dom.domain')}</label>
-        <input type="text" id="dom-domain" value="${esc(d.domain)}" placeholder="home.example.com" autocapitalize="off" autocomplete="off">
-        <p class="hint">${t('dom.domainHint')}</p></div>
-      <div class="field"><label for="dom-provider">${t('dom.provider')}</label>
-        <select id="dom-provider" class="lang">${providerOptions}</select></div>
-      <div id="dom-fields"></div>
-      <div class="field"><label for="dom-email">${t('dom.email')} <span class="hint">${t('new.envOptional')}</span></label>
-        <input type="text" id="dom-email" value="${esc(d.acmeEmail)}" placeholder="you@example.com" autocapitalize="off"></div>
-      <details class="field"><summary>${t('dom.advanced')}</summary>
-        <div class="row" style="margin-top:10px">
-          <div style="flex:1;min-width:120px"><label for="dom-http">HTTP</label><input type="number" id="dom-http" value="${esc(d.httpPort)}"></div>
-          <div style="flex:1;min-width:120px"><label for="dom-https">HTTPS</label><input type="number" id="dom-https" value="${esc(d.httpsPort)}"></div>
-        </div>
-        <p class="hint">${t('dom.portsHint')}</p>
-      </details>
-      <div id="dom-out"></div>
-      <button class="btn primary">${t('dom.saveApply')}</button>
-    </form>
-    <div id="dom-op" hidden><pre class="terminal" id="dom-term"></pre></div>`;
-
-  const drawFields = () => {
-    const id = document.getElementById('dom-provider').value;
-    const p = d.providers.find((x) => x.id === id);
-    const box = document.getElementById('dom-fields');
-    if (id === 'internal') {
-      box.innerHTML = `<p class="hint field">${t('dom.internalHint')}</p>`;
-      return;
-    }
-    if (!p) { box.innerHTML = ''; return; }
-    const help = p.help?.[lang] || p.help?.en || '';
-    box.innerHTML = `
-      ${help ? `<p class="hint field">${esc(help)}</p>` : ''}
-      ${p.fields.map((f) => {
-        const saved = id === d.dnsProvider ? d.credentials?.[f.key] || '' : '';
-        return `<div class="field"><label for="dns-${esc(f.key)}">${esc(f.label)}${f.required ? '' : ` <span class="hint">${t('new.envOptional')}</span>`}</label>
-          <input type="${f.secret ? 'password' : 'text'}" id="dns-${esc(f.key)}" data-key="${esc(f.key)}" class="dns-field"
-            value="${f.secret ? '' : esc(saved || f.default || '')}" placeholder="${esc(f.secret && saved ? saved : f.placeholder || '')}" autocomplete="off" autocapitalize="off"></div>`;
-      }).join('')}`;
-  };
-  drawFields();
-  document.getElementById('dom-provider').addEventListener('change', drawFields);
+      <div id="dom-form-box"></div>
+    </div>`;
+  domainForm(document.getElementById('dom-form-box'), d, {
+    onApplied: () => setTimeout(() => { if (route().tab === 'domains') settingsDomains(body); }, 8000),
+  });
 
   // The IP lock can only be switched on from the panel's own address (proof that it works).
   const drawLock = () => {
@@ -1225,37 +1409,6 @@ async function settingsDomains(body) {
     }
   });
   document.getElementById('dom-refresh')?.addEventListener('click', () => settingsDomains(body));
-
-  document.getElementById('dom-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const out = document.getElementById('dom-out');
-    const credentials = {};
-    document.querySelectorAll('.dns-field').forEach((el) => { credentials[el.dataset.key] = el.value; });
-    try {
-      await api('PUT', '/api/domains', {
-        domain: document.getElementById('dom-domain').value,
-        dnsProvider: document.getElementById('dom-provider').value,
-        acmeEmail: document.getElementById('dom-email').value,
-        httpPort: Number(document.getElementById('dom-http').value),
-        httpsPort: Number(document.getElementById('dom-https').value),
-        credentials,
-      });
-      out.innerHTML = '';
-    } catch (err) {
-      out.innerHTML = errorBox(err);
-      return;
-    }
-    const wrap = document.getElementById('dom-op');
-    const pre = document.getElementById('dom-term');
-    wrap.hidden = false;
-    pre.textContent = '';
-    const code = await stream('POST', '/api/domains/apply', (txt) => appendTo(pre, txt)).catch((err) => {
-      appendTo(pre, `\n${err.message}\n`);
-      return 1;
-    });
-    toast(t(code === 0 ? 'toast.done' : 'toast.failed'));
-    if (code === 0) setTimeout(() => { if (route().tab === 'domains') settingsDomains(body); }, 8000);
-  });
 }
 
 // ---------- backups ----------
@@ -1695,6 +1848,7 @@ function render() {
     state.refreshTimer = null;
     return renderAuth();
   }
+  if (state.afterSetup) return renderAccessStep();
   renderShell();
   const r = route();
   document.querySelectorAll('.bottom-nav a').forEach((a) => {

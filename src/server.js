@@ -1,3 +1,4 @@
+import { isPrivateIPv4 } from './dns-records.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -342,9 +343,13 @@ app.post('/api/backups/restore', wrap(async (req, res) => {
 
 // ---------- domains ----------
 
-app.get('/api/domains', wrap(async (_req, res) => {
-  res.json({ ...domains.publicConfig(), status: await domains.status() });
+app.get('/api/domains', wrap(async (req, res) => {
+  // The address the browser used is a good guess for this server's local IP.
+  const suggestedIp = isPrivateIPv4(req.hostname) ? req.hostname : '';
+  res.json({ ...domains.publicConfig(), suggestedIp, status: await domains.status() });
 }));
+
+app.post('/api/domains/check', wrap(async (req, res) => res.json(await domains.check(req.body || {}))));
 
 app.put('/api/domains', wrap(async (req, res) => {
   domains.saveConfig(req.body || {}, req.hostname);
