@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseConf, killSwitchScript, tunnelPorts, splitEndpoint, vpnImageFor } from '../src/vpn.js';
+import { parseConf, killSwitchScript, routesScript, tunnelPorts, splitEndpoint, vpnImageFor } from '../src/vpn.js';
 
 const CONF = `# my tunnel
 [Interface]
@@ -60,4 +60,13 @@ test('ports of tunnelled services move to the tunnel container', () => {
   assert.deepEqual(splitEndpoint('[2001:db8::1]:51820'), { host: '2001:db8::1', port: 51820 });
   assert.equal(vpnImageFor('0.8.0', true), 'ghcr.io/gadziunet/stackmoor-vpn:0.8.0');
   assert.equal(vpnImageFor('edge', true), 'ghcr.io/gadziunet/stackmoor-vpn:edge');
+});
+
+test('routes: the local network goes the normal way, private networks of the tunnel stay in it', () => {
+  const r = routesScript(parseConf('[Interface]\nPrivateKey = A\nAddress = 10.7.0.5/24\n[Peer]\nPublicKey = B\nEndpoint = 1.2.3.4:51820\nAllowedIPs = 0.0.0.0/0, ::/0, 10.7.0.0/24\n'));
+  assert.match(r, /ip -4 route replace 192\.168\.0\.0\/16 via "\$gw" dev "\$dev"/);
+  assert.match(r, /ip -4 route replace 10\.0\.0\.0\/8 via/);
+  // after the LAN routes, so an equal or narrower tunnel network wins
+  assert.ok(r.indexOf("'10.7.0.0/24' dev wg0") > r.indexOf('10.0.0.0/8 via'));
+  assert.doesNotMatch(routesScript(parseConf('[Interface]\nPrivateKey = A\nAddress = 10.7.0.5/24\n[Peer]\nPublicKey = B\nEndpoint = 1.2.3.4:51820\nAllowedIPs = 0.0.0.0/0\n')), /dev wg0/);
 });

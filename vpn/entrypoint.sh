@@ -3,6 +3,9 @@
 set -uo pipefail
 CONF=/etc/wireguard/wg0.conf
 RULES=/etc/wireguard/killswitch.sh
+ROUTES=/etc/wireguard/routes.sh
+# Local networks the normal way (written by the panel), after the tunnel is up.
+local_routes() { [ -f "$ROUTES" ] && bash "$ROUTES" && echo "Local networks go the normal way."; return 0; }
 
 [ -f "$CONF" ] || { echo "Missing $CONF"; exit 1; }
 
@@ -23,12 +26,13 @@ until wg-quick up wg0; do
   sleep 15 & wait $!
 done
 echo "Tunnel up."
+local_routes
 
 # 3. Bring it back if the interface disappears.
 while true; do
   sleep 30 & wait $!
   if ! ip link show wg0 >/dev/null 2>&1; then
     echo "Tunnel interface is gone – starting it again."
-    wg-quick up wg0 || true
+    wg-quick up wg0 && local_routes
   fi
 done
