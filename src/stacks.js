@@ -385,6 +385,13 @@ export function createStacks({ db, stacksDir, getSettings }) {
     ).all(name, limit);
   }
 
+  /** The latest operations of all stacks (for the dashboard). */
+  function recentOperations(limit = 8) {
+    return db.prepare(
+      'SELECT id, stack, action, status, started_at FROM operations ORDER BY id DESC LIMIT ?'
+    ).all(limit);
+  }
+
   function operationOutput(id) {
     return db.prepare('SELECT * FROM operations WHERE id = ?').get(id);
   }
@@ -427,7 +434,7 @@ export function createStacks({ db, stacksDir, getSettings }) {
   const exists = (name) => NAME_RE.test(String(name || '')) && Boolean(composeFile(name));
 
   return {
-    list, get, save, action, logs, remove, operations, operationOutput, assertName, images, config, stackDir,
+    list, get, save, action, logs, remove, operations, recentOperations, operationOutput, assertName, images, config, stackDir,
     hooks, exclusive, compose, prepare, recordOperation, exists, isBusy: (name) => locks.has(name),
   };
 }

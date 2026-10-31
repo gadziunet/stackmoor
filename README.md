@@ -53,7 +53,7 @@ Automatic volumes can be turned off per stack.
 
 Give every stack an address like `cloud.home.example.com` with a real HTTPS certificate – no ports to remember, and the server does not have to be reachable from the internet.
 
-1. **Right after installing** (or later in **Settings → Domains**): enter your domain, pick your DNS provider (Cloudflare, Bunny, OVHcloud, Hetzner, DigitalOcean, Porkbun, Namecheap, GoDaddy, IONOS, netcup, Gandi, AWS Route 53, deSEC, DuckDNS) and paste its API key. Keys are stored encrypted.
+1. **Right after installing** (or later in the **Domains** tab): enter your domain, pick your DNS provider (Cloudflare, Bunny, OVHcloud, Hetzner, DigitalOcean, Porkbun, Namecheap, GoDaddy, IONOS, netcup, Gandi, AWS Route 53, deSEC, DuckDNS) and paste its API key. Keys are stored encrypted.
 2. The DNS records `home.example.com` and `*.home.example.com` → the server's local IP are **added automatically** for Cloudflare, Bunny, Hetzner, DigitalOcean, Porkbun, deSEC and DuckDNS (with other providers, add them by hand). The server's IP is detected automatically and the records are updated when it changes. Before saving, Stackmoor checks the API key and warns if the domain already points to another server.
 3. **Stack → Domain:** choose a subdomain, the service and its port inside the container.
 
@@ -67,7 +67,7 @@ docker exec stackmoor node src/cli.js unlock
 
 ## Backups
 
-**Settings → Backups:** choose the storage (Backblaze B2, Amazon S3, Cloudflare R2, Hetzner, Wasabi or any S3-compatible), paste the keys, set an encryption password, the days and time, and how many backups to keep.
+**Backups** tab → **Backup settings:** choose the storage (Backblaze B2, Amazon S3, Cloudflare R2, Hetzner, Wasabi or any S3-compatible), paste the keys, set an encryption password, the days and time, and how many backups to keep.
 
 - **One encrypted repository** ([restic](https://restic.net)) in your bucket holds all stacks and the panel's own settings. Files that did not change are not uploaded again.
 - **Databases are dumped first** (PostgreSQL, MySQL/MariaDB, MongoDB; Redis is saved), while the apps keep running. The dump is backed up instead of the database's raw files. A service can set the type itself with the label `stackmoor.backup.dump: postgres|mysql|mongo|redis|none`.
@@ -83,7 +83,7 @@ docker exec stackmoor node src/cli.js unlock
 
 Send chosen apps through your **WireGuard** tunnel – like a second internet connection only for them. Typical use: a web SSH client (e.g. Termix) on your home server reaching VPSes whose firewall only allows the tunnel's fixed address.
 
-1. **Settings → VPN:** add a tunnel – paste your `.conf` file.
+1. **Network → VPN:** add a tunnel – paste your `.conf` file.
 2. **Stack → VPN:** choose the tunnel and the services that should use it.
 
 What goes through the tunnel follows `AllowedIPs` in your file. **Kill switch is always on:** if the tunnel is down, those apps have no internet at all and the panel shows a warning. Details: [docs.stackmoor.dev/guides/vpn](https://docs.stackmoor.dev/guides/vpn/).

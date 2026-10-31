@@ -19,6 +19,7 @@ import { createDomains } from './domains.js';
 import { createPanelLock } from './panel-lock.js';
 import { createBackups } from './backups.js';
 import { createVpn } from './vpn.js';
+import { buildOverview } from './overview.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -257,6 +258,36 @@ app.post('/api/stacks/:name/actions/:action', wrap(async (req, res) => {
   }
 }));
 
+// ---------- overview (dashboard and status bar) ----------
+
+// Caddy's status needs docker exec and logs – keep it for a minute.
+let domainStatusCache = { at: 0, value: null, domain: null };
+async function cachedDomainStatus() {
+  const domain = getSettings(db).domain || '';
+  if (!domain) return { enabled: false };
+  if (domainStatusCache.value && domainStatusCache.domain === domain && Date.now() - domainStatusCache.at < 60_000) {
+    return domainStatusCache.value;
+  }
+  const value = await domains.status().catch(() => ({ enabled: true, domain, running: false, certificate: false }));
+  domainStatusCache = { at: Date.now(), value, domain };
+  return value;
+}
+
+app.get('/api/overview', wrap(async (_req, res) => {
+  const b = backups.status();
+  res.json(buildOverview({
+    domain: getSettings(db).domain || '',
+    routes: domains.routes(),
+    snapshots: getState(db, 'backup.snapshots')?.list || [],
+    backupsConfigured: b.configured,
+    backupHistory: b.history,
+    backupRunning: b.running,
+    operations: stacks.recentOperations(8),
+    tunnels: vpn.list(),
+    domainStatus: await cachedDomainStatus(),
+  }));
+}));
+
 // ---------- updates ----------
 
 app.get('/api/updates', wrap(async (_req, res) => {
@@ -406,7 +437,9 @@ app.get('/api/domains', wrap(async (req, res) => {
   const suggestedIp = isPrivateIPv4(req.hostname) ? req.hostname : '';
   const cfg = domains.publicConfig();
   if (cfg.serverIpAuto && !cfg.detectedIp) cfg.detectedIp = await withTimeout(domains.detectServerIp().catch(() => ''), 10_000);
-  res.json({ ...cfg, suggestedIp, status: await domains.status() });
+  const status = await domains.status();
+  domainStatusCache = { at: Date.now(), value: status, domain: status.domain || null };
+  res.json({ ...cfg, suggestedIp, status, routes: domains.routes() });
 }));
 
 app.post('/api/domains/check', wrap(async (req, res) => res.json(await domains.check(await serverIpFor(req.body || {}, req)))));
@@ -434,7 +467,11 @@ app.post('/api/domains/apply', wrap(async (req, res) => {
   res.end();
 }));
 
-app.get('/api/domains/status', wrap(async (_req, res) => res.json(await domains.status())));
+app.get('/api/domains/status', wrap(async (_req, res) => {
+  const value = await domains.status();
+  domainStatusCache = { at: Date.now(), value, domain: value.domain || null };
+  res.json(value);
+}));
 
 app.get('/api/stacks/:name/routes', wrap(async (req, res) => {
   stacks.assertName(req.params.name);

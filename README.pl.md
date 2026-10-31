@@ -62,7 +62,7 @@ Stack można utworzyć w istniejącym folderze bez `compose.yaml`, więc dane mo
 
 Każdy stack może dostać adres typu `chmura.dom.example.com` z prawdziwym certyfikatem HTTPS – bez pamiętania portów i bez wystawiania serwera do internetu.
 
-1. **Zaraz po instalacji** (albo później w **Ustawieniach → Domeny**): wpisz domenę, wybierz dostawcę DNS (Cloudflare, Bunny, OVHcloud, Hetzner, DigitalOcean, Porkbun, Namecheap, GoDaddy, IONOS, netcup, Gandi, AWS Route 53, deSEC, DuckDNS) i wklej klucz API. Klucze są zapisywane w formie zaszyfrowanej.
+1. **Zaraz po instalacji** (albo później w zakładce **Domeny**): wpisz domenę, wybierz dostawcę DNS (Cloudflare, Bunny, OVHcloud, Hetzner, DigitalOcean, Porkbun, Namecheap, GoDaddy, IONOS, netcup, Gandi, AWS Route 53, deSEC, DuckDNS) i wklej klucz API. Klucze są zapisywane w formie zaszyfrowanej.
 2. Rekordy DNS `dom.example.com` i `*.dom.example.com` → lokalny adres IP serwera **dodają się same** dla Cloudflare, Bunny, Hetzner, DigitalOcean, Porkbun, deSEC i DuckDNS (u pozostałych dostawców dodaj je ręcznie). Adres IP serwera jest wykrywany automatycznie, a rekordy aktualizują się, gdy się zmieni. Przed zapisaniem Stackmoor sprawdza klucz API i ostrzega, jeśli domena wskazuje już na inny serwer.
 3. **Stack → Domena:** wybierz subdomenę, usługę i jej port w kontenerze.
 
@@ -76,7 +76,7 @@ docker exec stackmoor node src/cli.js unlock
 
 ## Kopie zapasowe
 
-**Ustawienia → Backup:** wybierz magazyn (Backblaze B2, Amazon S3, Cloudflare R2, Hetzner, Wasabi albo dowolny zgodny z S3), wklej klucze, ustaw hasło szyfrowania, dni i godzinę oraz ile kopii trzymać.
+Zakładka **Kopie** → **Ustawienia kopii:** wybierz magazyn (Backblaze B2, Amazon S3, Cloudflare R2, Hetzner, Wasabi albo dowolny zgodny z S3), wklej klucze, ustaw hasło szyfrowania, dni i godzinę oraz ile kopii trzymać.
 
 - **Jedno zaszyfrowane repozytorium** ([restic](https://restic.net)) w Twoim buckecie mieści wszystkie stacki i ustawienia samego panelu. Niezmienione pliki nie są wysyłane ponownie.
 - **Najpierw zrzuty baz danych** (PostgreSQL, MySQL/MariaDB, MongoDB; Redis jest zapisywany), a aplikacje działają dalej. Do kopii trafia zrzut zamiast surowych plików bazy. Usługa może sama wskazać typ etykietą `stackmoor.backup.dump: postgres|mysql|mongo|redis|none`.
@@ -92,7 +92,7 @@ docker exec stackmoor node src/cli.js unlock
 
 Wybrane aplikacje wysyłają ruch Twoim tunelem **WireGuard** – jak drugie łącze tylko dla nich. Typowy przypadek: webowy klient SSH (np. Termix) na domowym serwerze łączy się z VPS-ami, których firewall wpuszcza tylko stały adres tunelu.
 
-1. **Ustawienia → VPN:** dodaj tunel – wklej swój plik `.conf`.
+1. **Sieć → VPN:** dodaj tunel – wklej swój plik `.conf`.
 2. **Stack → VPN:** wybierz tunel i usługi, które mają z niego korzystać.
 
 To, co idzie tunelem, wynika z `AllowedIPs` w Twoim pliku. **Blokada (kill switch) jest zawsze włączona:** gdy tunel nie działa, te aplikacje nie mają w ogóle internetu, a panel pokazuje ostrzeżenie. Szczegóły: [docs.stackmoor.dev/pl/guides/vpn](https://docs.stackmoor.dev/pl/guides/vpn/).

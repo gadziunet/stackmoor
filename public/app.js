@@ -16,6 +16,36 @@ const NEW_STACK_TEMPLATE = `services:
 
 const stateLabel = (s) => t(`state.${s}`);
 
+// ---------- theme: the system decides until the user picks light or dark ----------
+const THEME_KEY = 'sm-theme';
+const storedTheme = () => { try { return localStorage.getItem(THEME_KEY); } catch { return null; } };
+function applyTheme() {
+  const v = storedTheme();
+  if (v === 'light' || v === 'dark') document.documentElement.dataset.theme = v;
+  else delete document.documentElement.dataset.theme;
+}
+const currentTheme = () => document.documentElement.dataset.theme
+  || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+function setTheme(v) {
+  try { localStorage.setItem(THEME_KEY, v); } catch { /* private mode: just this tab */ }
+  applyTheme();
+}
+applyTheme();
+
+const svg = (d, size = 18) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const ICON = {
+  stacks: '<path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/>',
+  backups: '<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>',
+  domains: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/>',
+  network: '<path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6l8-3z"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',
+  moon: '<path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/>',
+  logout: '<path d="M15 4h4v16h-4"/><path d="M10 8l-4 4 4 4"/><path d="M6 12h10"/>',
+  up: '<path d="M12 19V5"/><path d="M6 11l6-6 6 6"/>',
+};
+
 // ---------- helpers ----------
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -443,45 +473,183 @@ function renderRestoreProgress() {
 
 const LOGO = `<img src="/logo.svg" alt="" width="28" height="28">`;
 
+// Old addresses (Settings → Domains, VPN, Backups, Account) keep working.
+const OLD_HASH = { 'settings/domains': 'domains', 'settings/vpn': 'network/vpn', 'settings/backups': 'backups', 'settings/account': 'account', 'settings/general': 'settings/folders' };
+
 function route() {
-  const h = location.hash.replace(/^#\/?/, '');
-  if (h === 'new') return { page: 'new' };
+  let h = location.hash.replace(/^#\/?/, '');
+  if (OLD_HASH[h]) { h = OLD_HASH[h]; history.replaceState(null, '', `#/${h}`); }
+  if (h === 'new') return { page: 'new', nav: 'home' };
+  if (h === 'backups') return { page: 'backups', tab: 'backups', nav: 'backups' };
+  if (h === 'domains') return { page: 'domains', tab: 'domains', nav: 'domains' };
+  if (h === 'account') return { page: 'account', tab: 'account', nav: '' };
+  const net = h.match(/^network(?:\/([a-z]+))?$/);
+  if (net) return { page: 'network', tab: net[1] || 'vpn', nav: 'network' };
   const st = h.match(/^settings(?:\/([a-z]+))?$/);
-  if (st) return { page: 'settings', tab: st[1] || 'general' };
+  if (st) return { page: 'settings', tab: st[1] || 'panel', nav: 'settings' };
   const m = h.match(/^stack\/([a-z0-9_-]+)$/);
-  if (m) return { page: 'stack', name: m[1] };
-  return { page: 'home' };
+  if (m) return { page: 'stack', name: m[1], nav: 'home' };
+  return { page: 'home', nav: 'home' };
+}
+
+const NAV = [
+  ['home', '#/', 'nav.stacks', 'stacks'],
+  ['backups', '#/backups', 'nav.backups', 'backups'],
+  ['domains', '#/domains', 'nav.domains', 'domains'],
+  ['network', '#/network', 'nav.network', 'network'],
+  ['settings', '#/settings', 'nav.settings', 'settings'],
+];
+
+async function logout() {
+  await api('POST', '/api/logout').catch(() => {});
+  state.user = null;
+  render();
 }
 
 function renderShell() {
   if (!document.querySelector('.layout')) {
     app.innerHTML = `
       <div class="layout">
-        <aside class="sidebar">
-          <a class="brand" href="#/" title="${esc(t('home.title'))}">${LOGO}<span>Stackmoor</span></a><span class="version">${esc(state.version)}</span>
-          <a class="update-pill" id="panel-update" href="#/settings/updates" hidden></a>
-          <a class="btn primary new" href="#/new"><span class="lbl-long">${t('nav.newStack')}</span><span class="lbl-short">${t('nav.newShort')}</span></a>
-          <ul class="stack-list" id="stack-list"></ul>
-          <div class="sidebar-foot">
-            <a class="btn small" href="#/settings">${t('nav.settings')}</a>
-            <button class="btn small" id="logout">${t('nav.logout')}</button>
+        <header class="topbar">
+          <a class="brand" href="#/">${LOGO}<span>Stackmoor</span></a>
+          <nav class="topnav" aria-label="Stackmoor">
+            ${NAV.map(([k, href, label]) => `<a href="${href}" data-nav="${k}">${t(label)}</a>`).join('')}
+          </nav>
+          <div class="top-actions">
+            <div class="search" id="search-box">
+              <button type="button" class="search-toggle" id="search-toggle" aria-label="${esc(t('nav.search'))}">${svg(ICON.search, 20)}</button>
+              <label for="stack-search" class="sr-only">${t('nav.search')}</label>
+              <input type="search" id="stack-search" placeholder="${esc(t('nav.searchPh'))}" autocomplete="off" autocapitalize="off" spellcheck="false">
+            </div>
+            <a class="btn primary new-btn" href="#/new" aria-label="${esc(t('new.title'))}"><span class="lbl-long">${t('nav.newStack')}</span><span class="lbl-short">+</span></a>
+            <div class="acct" id="acct">
+              <button type="button" id="acct-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="acct-menu" aria-label="${esc(t('acct.title'))}">
+                ${svg(ICON.user)}<span class="acct-label">${t('acct.title')}</span><span class="caret" aria-hidden="true">▾</span>
+              </button>
+              <div class="acct-menu" id="acct-menu" role="menu" hidden>
+                <a role="menuitem" href="#/account">${svg(ICON.user, 16)}${t('acct.settings')}</a>
+                <div class="row-item">${svg(ICON.moon, 16)}<span>${t('acct.theme')}</span>
+                  <span class="seg" role="group" aria-label="${esc(t('acct.theme'))}">
+                    <button type="button" data-theme-set="light">${t('acct.light')}</button>
+                    <button type="button" data-theme-set="dark">${t('acct.dark')}</button>
+                  </span></div>
+                <hr>
+                <button type="button" role="menuitem" class="item logout" id="logout">${svg(ICON.logout, 16)}${t('nav.logout')}</button>
+              </div>
+            </div>
           </div>
-        </aside>
-        <div class="main-wrap"><div id="global-warning"></div><main class="main" id="main"></main></div>
+        </header>
+        <div id="update-banner"></div>
+        <div id="global-warning"></div>
+        <div class="content" id="content"></div>
+        <footer class="statusbar" id="statusbar" aria-label="${esc(t('bar.label'))}"></footer>
         <nav class="bottom-nav" aria-label="Stackmoor">
-          <a href="#/" data-nav="home">${t('home.title')}</a>
-          <a href="#/settings" data-nav="settings">${t('nav.settings')}</a>
+          ${NAV.map(([k, href, label, icon]) => `<a href="${href}" data-nav="${k}">${svg(ICON[icon], 20)}${t(label)}</a>`).join('')}
         </nav>
       </div>`;
-    document.getElementById('logout').addEventListener('click', async () => {
-      await api('POST', '/api/logout').catch(() => {});
-      state.user = null;
-      render();
-    });
+    bindShell();
   }
-  renderStackList();
+  const r = route();
+  document.querySelectorAll('[data-nav]').forEach((a) => {
+    const on = a.dataset.nav === r.nav;
+    a.classList.toggle('on', on);
+    if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+  });
+  document.getElementById('acct').classList.toggle('on', r.page === 'account');
+  drawThemeButtons();
   renderUpdateBadge();
   renderGlobalWarning();
+  renderStatusbar();
+}
+
+function drawThemeButtons() {
+  const cur = currentTheme();
+  document.querySelectorAll('[data-theme-set]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.themeSet === cur)));
+}
+
+function bindShell() {
+  const btn = document.getElementById('acct-btn');
+  const menu = document.getElementById('acct-menu');
+  const close = () => { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); };
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    menu.hidden = !menu.hidden;
+    btn.setAttribute('aria-expanded', String(!menu.hidden));
+  });
+  document.addEventListener('click', (e) => { if (!menu.hidden && !menu.contains(e.target)) close(); });
+  menu.addEventListener('click', (e) => { if (e.target.closest('a')) close(); });
+  menu.querySelectorAll('[data-theme-set]').forEach((b) => b.addEventListener('click', () => {
+    setTheme(b.dataset.themeSet);
+    drawThemeButtons();
+  }));
+  document.getElementById('logout').addEventListener('click', logout);
+
+  // Search: filters the stack cards and the stack list; Enter opens the first match.
+  const box = document.getElementById('search-box');
+  const input = document.getElementById('stack-search');
+  input.addEventListener('input', () => {
+    state.search = input.value.trim().toLowerCase();
+    const r = route();
+    if (r.page === 'home') renderHome();
+    else if (r.page === 'stack') renderStackList();
+    else if (state.search) location.hash = '#/';
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const hit = filteredStacks()[0];
+      if (hit) { location.hash = `#/stack/${hit.name}`; input.blur(); box.classList.remove('open'); }
+    }
+    if (e.key === 'Escape') { input.value = ''; state.search = ''; input.dispatchEvent(new Event('input')); input.blur(); box.classList.remove('open'); }
+  });
+  document.getElementById('search-toggle').addEventListener('click', () => {
+    box.classList.toggle('open');
+    if (box.classList.contains('open')) input.focus();
+  });
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k' && document.getElementById('stack-search')) {
+      e.preventDefault();
+      box.classList.add('open');
+      input.focus();
+      input.select();
+    }
+    if (e.key === 'Escape') close();
+  });
+}
+
+const filteredStacks = () => {
+  const q = state.search || '';
+  return q ? state.stacks.filter((s) => s.name.includes(q)) : state.stacks;
+};
+
+/** Sets up the area under the top bar for a page and returns its <main>. */
+function frame(kind, opts = {}) {
+  const content = document.getElementById('content');
+  if (kind === 'stack') {
+    if (!content.querySelector('.stack-layout')) {
+      content.innerHTML = `
+        <div class="stack-layout">
+          <aside class="stack-side" aria-label="${esc(t('home.title'))}">
+            <a class="back" href="#/">← ${t('stack.allStacks')}</a>
+            <ul class="stack-list" id="stack-list"></ul>
+          </aside>
+          <div class="stack-main"><main class="main" id="main"></main></div>
+        </div>`;
+    }
+    renderStackList();
+  } else if (kind === 'sub') {
+    content.innerHTML = `
+      <div class="subpage">
+        <nav class="subnav" aria-label="${esc(opts.label)}">
+          ${opts.items.map((x) => x.soon
+            ? `<a aria-disabled="true">${esc(x.label)} <span class="tag soon">${t('net.soon')}</span></a>`
+            : `<a href="${x.href}" class="${x.on ? 'on' : ''}"${x.on ? ' aria-current="page"' : ''}>${esc(x.label)}</a>`).join('')}
+        </nav>
+        <main class="main" id="main"></main>
+      </div>`;
+  } else {
+    content.innerHTML = '<main class="main" id="main"></main>';
+  }
+  return document.getElementById('main');
 }
 
 function renderGlobalWarning() {
@@ -495,52 +663,179 @@ function renderGlobalWarning() {
   warn.innerHTML = (state.stacksDirOk === false
     ? `<div class="notice error global">${t('warn.stacksDir', { dir: esc(state.stacksDir) })}</div>`
     : '')
-    + (state.updating ? `<div class="notice info global">${t('upd.restarting')}</div>` : '')
     + Object.entries(down).map(([tunnel, names]) => `<div class="notice error global plain">${t('vpn.warnDown', { name: esc(tunnel), stacks: names.map(esc).join(', ') })}
-        <a href="#/settings/vpn">${t('vpn.warnOpen')}</a></div>`).join('');
+        <a href="#/network">${t('vpn.warnOpen')}</a></div>`).join('');
 }
+
+const stackTags = (s) => (s.updateAvailable ? `<span class="tag solid" title="${esc(t('upd.stackBadge'))}">↑ ${t('dash.new')}</span>` : '')
+  + (s.vpn ? `<span class="tag ${s.vpn.ok ? '' : 'bad'}" title="${esc(t(s.vpn.ok ? 'vpn.tagOk' : 'vpn.tagDown', { name: s.vpn.tunnel }))}">VPN${s.vpn.ok ? '' : ' ✕'}</span>` : '');
 
 function renderStackList() {
   const list = document.getElementById('stack-list');
   if (!list) return;
   const current = route().name;
-  list.innerHTML = state.stacks.length
-    ? state.stacks.map((s) => `
-      <li><a href="#/stack/${esc(s.name)}" class="${s.name === current ? 'active' : ''}" title="${esc(stateLabel(s.state))}">
-        <span class="dot ${s.state}"></span>${esc(s.name)}
-        ${s.updateAvailable ? `<span class="upd" title="${esc(t('upd.stackBadge'))}" aria-label="${esc(t('upd.stackBadge'))}">↑</span>` : ''}
-        ${s.vpn ? `<span class="vpn-tag ${s.vpn.ok ? '' : 'bad'}" title="${esc(t(s.vpn.ok ? 'vpn.tagOk' : 'vpn.tagDown', { name: s.vpn.tunnel }))}">VPN${s.vpn.ok ? '' : ' ✕'}</span>` : ''}
-        <span class="count">${s.total ? `${s.running}/${s.total}` : ''}</span>
+  const items = filteredStacks();
+  const addr = state.overview?.addresses || {};
+  list.innerHTML = items.length
+    ? items.map((s) => `
+      <li><a href="#/stack/${esc(s.name)}" class="${s.name === current ? 'active' : ''}"${s.name === current ? ' aria-current="page"' : ''} title="${esc(stateLabel(s.state))}">
+        <span class="l1"><span class="dot ${s.state}"></span>${esc(s.name)}${stackTags(s)}</span>
+        <span class="l2">${s.total ? `${s.running}/${s.total}` : esc(stateLabel(s.state))}${addr[s.name] ? ` · ${esc(addr[s.name])}` : ''}</span>
       </a></li>`).join('')
-    : `<li class="empty-hint">${t('nav.noStacks')}</li>`;
+    : `<li class="empty-hint">${t(state.search ? 'nav.noMatch' : 'nav.noStacks')}</li>`;
 }
 
+// ---------- status bar ----------
+
+const ago = (iso) => {
+  const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
+  if (s < 60) return t('vpn.agoS', { n: s });
+  if (s < 3600) return t('vpn.agoM', { n: Math.round(s / 60) });
+  if (s < 86400 * 2) return t('vpn.agoH', { n: Math.round(s / 3600) });
+  return t('vpn.agoD', { n: Math.round(s / 86400) });
+};
+
+function renderStatusbar() {
+  const bar = document.getElementById('statusbar');
+  if (!bar) return;
+  const o = state.overview;
+  const parts = [];
+  if (o?.domain?.enabled) {
+    const d = o.domain;
+    parts.push(`<a href="#/domains"><span class="${d.running ? 'ok' : 'bad'}">${d.running ? '●' : '✕'}</span> <span class="lbl-long">${t(d.running ? 'bar.caddyOk' : 'bar.caddyDown')}</span><span class="lbl-short">Caddy</span></a>`);
+    parts.push(`<a href="#/domains"><span class="${d.certificate ? 'ok' : ''}">${d.certificate ? '✓' : '…'}</span> <span class="lbl-long">${d.certificate ? t('bar.cert', { domain: esc(d.domain) }) : t('bar.certWaiting')}</span><span class="lbl-short">${t('bar.certShort')}</span></a>`);
+  }
+  (o?.vpn || []).slice(0, 3).forEach((v, i) => {
+    const ok = v.state === 'up';
+    const cls = ok ? 'ok' : v.state === 'down' ? 'bad' : '';
+    parts.push(`<a href="#/network"${i ? ' class="hide-mobile"' : ''}><span class="${cls}">${v.state === 'down' ? '✕' : '●'}</span> <span class="lbl-long">${t('bar.vpn', { name: esc(v.name), state: t(`vpn.state.${v.state}`) })}</span><span class="lbl-short">VPN</span></a>`);
+  });
+  if (o?.backup?.configured) {
+    const b = o.backup;
+    const txt = b.running ? t('bar.backupRunning')
+      : b.last ? `${b.last.ok ? '' : '✕ '}${t('bar.backup', { ago: ago(b.last.at) })}${b.lastSize ? ` · ${fmtBytes(b.lastSize)}` : ''}`
+        : t('bar.backupNever');
+    const short = b.running ? '…' : b.last ? ago(b.last.at) : '—';
+    parts.push(`<a href="#/backups"><span class="lbl-long">${txt}</span><span class="lbl-short">${t('bar.backupShort', { ago: short })}</span></a>`);
+  }
+  const p = state.updates?.panel;
+  const ver = p?.updateAvailable
+    ? `<button type="button" class="ver-upd" id="bar-upd">${esc(state.version)} → ${esc(p.buildUpdate ? t('upd.newBuildShort') : showVersion(p.latest))} ↑</button>`
+    : `<span class="ver">${esc(state.version)}</span>`;
+  bar.innerHTML = parts.map((x) => `<span${x.includes('hide-mobile') ? ' class="hide-mobile"' : ''}>${x}</span>`).join('') + ver;
+  document.getElementById('bar-upd')?.addEventListener('click', openUpdateDialog);
+}
+
+async function refreshOverview() {
+  try {
+    state.overview = await api('GET', '/api/overview');
+    renderStatusbar();
+    renderStackList();
+    if (route().page === 'home') renderHome();
+  } catch { /* e.g. logged out */ }
+}
+
+let refreshTick = 0;
 async function refreshStacks() {
   try {
     state.stacks = await api('GET', '/api/stacks');
     renderStackList();
     renderGlobalWarning();
     if (route().page === 'home') renderHome();
+    refreshTick += 1;
+    if (refreshTick % 3 === 0) refreshOverview();
   } catch { /* e.g. logged out */ }
 }
 
 // ---------- pages ----------
 
-function renderHome() {
-  const main = document.getElementById('main');
-  main.innerHTML = `
-    <div class="head"><h1>${t('home.title')}</h1></div>
-    ${state.stacks.length ? `<div class="home-grid">${state.stacks.map((s) => `
-      <a class="card" href="#/stack/${esc(s.name)}"><span class="dot ${s.state}"></span>
-        <div><strong>${esc(s.name)}</strong><br><span class="hint">${esc(stateLabel(s.state))}${s.total ? ` · ${s.running}/${s.total}` : ''}${s.updateAvailable ? ` · ${t('upd.stackBadge')}` : ''}</span></div>
-      </a>`).join('')}</div>`
-    : `<div class="card"><h2>${t('home.emptyTitle')}</h2>
-        <p class="hint">${t('home.emptyLead')}</p>
-        <p><a class="btn primary" href="#/new">${t('home.emptyCta')}</a></p></div>`}`;
+/** Restart or start a stack from its card, without leaving the dashboard. */
+const busyStacks = new Map();
+async function quickAction(name, act, btn) {
+  busyStacks.set(name, act);
+  btn.disabled = true;
+  btn.textContent = `${t(`act.${act}`)}…`;
+  const code = await stream('POST', `/api/stacks/${name}/actions/${act}`, () => {}).catch(() => 1);
+  busyStacks.delete(name);
+  toast(t(code === 0 ? 'act.done' : 'act.failed', { action: `${t(`act.${act}`)} · ${name}` }));
+  await refreshStacks();
+  refreshOverview();
 }
 
+function eventText(e) {
+  if (e.type === 'backup') {
+    const kind = t(`bak.kind.${e.kind}`);
+    if (e.stack) return `${kind} – ${esc(e.stack)}`;
+    return e.stacks ? `${kind} – ${t('bak.runStacks', { n: e.stacks })}` : kind;
+  }
+  return `${t(`act.${e.action}`)} – ${esc(e.stack)}`;
+}
+
+function renderHome() {
+  if (route().page !== 'home') return;
+  const main = document.getElementById('main') || frame('page');
+  const o = state.overview || {};
+  const addr = o.addresses || {};
+  const per = o.backup?.perStack || {};
+  const items = filteredStacks();
+  const running = state.stacks.filter((s) => s.state === 'running').length;
+  const upd = state.stacks.filter((s) => s.updateAvailable).length;
+  const summary = [t('dash.running', { n: running, total: state.stacks.length })];
+  if (upd) summary.push(t('dash.updates', { n: upd }));
+
+  if (!state.stacks.length) {
+    main.innerHTML = `<div class="card strong"><h2>${t('home.emptyTitle')}</h2>
+      <p class="hint">${t('home.emptyLead')}</p>
+      <p><a class="btn primary" href="#/new">${t('home.emptyCta')}</a></p></div>`;
+    return;
+  }
+  // Keep focus and scroll while the cards refresh every few seconds.
+  const scroll = window.scrollY;
+  main.innerHTML = `
+    <div class="dash-head"><h1>${t('home.title')}</h1><p class="hint">${summary.join(' · ')}</p></div>
+    ${items.length ? `<div class="stack-cards">${items.map((s) => {
+      const b = per[s.name];
+      const act = s.updateAvailable ? 'update' : s.state === 'running' || s.state === 'partial' ? 'restart' : 'up';
+      return `
+      <article class="stack-card ${s.updateAvailable ? 'upd' : ''}">
+        <div class="top"><span class="dot ${s.state}" title="${esc(stateLabel(s.state))}"></span>
+          <h3><a href="#/stack/${esc(s.name)}">${esc(s.name)}</a></h3>${s.updateAvailable ? `<span class="tag solid">${t('dash.update')}</span>` : s.vpn ? `<span class="tag ${s.vpn.ok ? '' : 'bad'}">VPN · ${esc(s.vpn.tunnel)}</span>` : ''}</div>
+        <dl>
+          <dt>${t('dash.containers')}</dt><dd>${s.total ? `${s.running}/${s.total} ` : ''}${esc(stateLabel(s.state))}</dd>
+          <dt>${t('dash.address')}</dt><dd>${addr[s.name] ? esc(addr[s.name]) : '—'}</dd>
+          ${o.backup?.configured ? `<dt>${t('dash.backup')}</dt><dd>${b ? `${ago(b.at)}${b.size ? ` · ${fmtBytes(b.size)}` : ''}` : '—'}</dd>` : ''}
+        </dl>
+        <div class="acts">
+          ${busyStacks.has(s.name)
+            ? `<button type="button" class="btn" disabled>${t(`act.${busyStacks.get(s.name)}`)}…</button>`
+            : `<button type="button" class="btn ${act === 'update' ? 'primary' : ''}" data-quick="${act}" data-name="${esc(s.name)}">${t(`act.${act}`)}</button>`}
+          <a class="btn" href="#/stack/${esc(s.name)}">${t('dash.open')}</a>
+        </div>
+      </article>`;
+    }).join('')}</div>` : `<p class="hint">${t('nav.noMatch')}</p>`}
+    ${o.events?.length ? `
+      <section><h2>${t('dash.events')}</h2>
+        <div class="events">${o.events.map((e) => `
+          <div><time datetime="${esc(e.at)}">${esc(fmtShort(e.at))}</time><span>${eventText(e)}</span>
+            <span class="res ${e.status === 'running' ? '' : e.ok ? 'ok' : 'bad'}">${e.status === 'running' ? t('dash.evRunning') : e.ok ? `✓ ${t('dash.evOk')}` : `✕ ${t('dash.evFailed')}`}</span></div>`).join('')}
+        </div></section>` : ''}`;
+  window.scrollTo(0, scroll);
+  main.querySelectorAll('[data-quick]').forEach((b) => b.addEventListener('click', () => {
+    const name = b.dataset.name;
+    if (b.dataset.quick === 'update') {
+      // Updating shows its output on the stack page (and asks first).
+      state.pendingAction = { name, act: 'update' };
+      location.hash = `#/stack/${name}`;
+      return;
+    }
+    quickAction(name, b.dataset.quick, b);
+  }));
+}
+
+const fmtShort = (iso) => new Date(iso).toLocaleString(lang === 'pl' ? 'pl-PL' : 'en-GB', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+
 function renderNew() {
-  const main = document.getElementById('main');
+  const main = frame('page');
   main.innerHTML = `
     <div class="head"><h1>${t('new.title')}</h1></div>
     <form id="new" class="card">
@@ -617,15 +912,15 @@ async function fillOpenButton(name, containers) {
   const label = (u) => esc(u.replace(/^https?:\/\//, ''));
   if (!urls.length) slot.innerHTML = '';
   else if (urls.length === 1) {
-    slot.innerHTML = `<a class="btn" href="${esc(urls[0])}" target="_blank" rel="noopener" title="${esc(urls[0])}">${t('act.open')} ↗</a>`;
+    slot.innerHTML = `<a class="btn primary" href="${esc(urls[0])}" target="_blank" rel="noopener" title="${esc(urls[0])}">${t('act.openApp')} ↗</a>`;
   } else {
-    slot.innerHTML = `<details class="open-menu"><summary class="btn">${t('act.open')} ▾</summary>
+    slot.innerHTML = `<details class="open-menu"><summary class="btn primary">${t('act.openApp')} ▾</summary>
       <div class="menu">${urls.map((u) => `<a href="${esc(u)}" target="_blank" rel="noopener">${label(u)} ↗</a>`).join('')}</div></details>`;
   }
 }
 
 async function renderStack(name) {
-  const main = document.getElementById('main');
+  const main = frame('stack');
   main.innerHTML = `<p class="hint">${t('stack.loading')}</p>`;
   let data;
   try {
@@ -636,16 +931,18 @@ async function renderStack(name) {
   }
   const summary = state.stacks.find((s) => s.name === name) || { state: 'down' };
 
+  const notRunning = summary.state !== 'running';
   main.innerHTML = `
+    <a class="back-mobile" href="#/">← ${t('stack.allStacks')}</a>
     <div class="head">
       <h1>${esc(name)}</h1>
-      <span class="badge ${summary.state}" id="badge">${esc(stateLabel(summary.state))}</span>
+      <span class="badge ${summary.state}" id="badge">● ${esc(stateLabel(summary.state))}${summary.total ? ` · ${summary.running}/${summary.total}` : ''}</span>
       <div class="actions">
-        <button class="btn primary" data-act="up">${t('act.up')}</button>
+        ${notRunning ? `<button class="btn" data-act="up">${t('act.up')}</button>` : ''}
         <button class="btn" data-act="restart">${t('act.restart')}</button>
         <button class="btn" data-act="update" title="${esc(t('act.updateTitle'))}">${t('act.update')}</button>
         <button class="btn" data-act="stop">${t('act.stop')}</button>
-        <button class="btn" data-act="down" title="${esc(t('act.downTitle'))}">${t('act.down')}</button>
+        <button class="btn hide-mobile" data-act="down" title="${esc(t('act.downTitle'))}">${t('act.down')}</button>
         <span id="open-slot"></span>
       </div>
     </div>
@@ -653,11 +950,9 @@ async function renderStack(name) {
     <div id="op-wrap" hidden><h2 id="op-title">${t('act.operation')}</h2><pre class="terminal" id="op"></pre><br></div>
     <div class="tabs" role="tablist">
       ${['compose', 'env', 'domain', 'vpn', 'containers', 'logs', 'backups', 'history', 'delete']
-        .map((k, i) => `<button data-tab="${k}" class="${i === 0 ? 'on' : ''}">${t(`tab.${k}`)}</button>`).join('')}
+        .map((k, i) => `<button data-tab="${k}" class="${i === 0 ? 'on' : ''}${k === 'delete' ? ' del' : ''}">${t(`tab.${k}`)}</button>`).join('')}
     </div>
     <div id="tab"></div>`;
-
-  fillOpenButton(name, data.containers);
 
   let autostart = false;
   if (state.pendingNotice?.name === name) {
@@ -677,10 +972,39 @@ async function renderStack(name) {
 
   let currentTab = 'compose';
   const tab = document.getElementById('tab');
+  let routesInfo = null;
+
+  // Cards next to the editor: containers, addresses and the latest backups of this stack.
+  const sideCards = () => {
+    const cts = data.containers || [];
+    const urls = [...new Set([...openTargets(routesInfo, cts), ...openTargets(null, cts)])];
+    const dom = state.overview?.domain;
+    const hasDomainUrl = urls.some((u) => u.startsWith('https://') && dom?.domain && u.endsWith(dom.domain));
+    return `
+      <section class="side-card"><h2>${t('side.containers')}</h2>
+        ${cts.length ? cts.map((c) => `<div class="item"><span class="dot ${c.state === 'running' ? 'running' : 'exited'}" title="${esc(c.status)}"></span><strong>${esc(c.service)}</strong>
+          <span class="r" title="${esc(c.image)}">${esc(c.image.replace(/^docker\.io\//, ''))}</span></div>`).join('')
+        : `<div class="body hint">${t('ct.empty')}</div>`}</section>
+      <section class="side-card"><h2>${t('side.addresses')}</h2>
+        <div class="body">${urls.length ? urls.map((u) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(u.replace(/^https?:\/\//, ''))} ↗</a>`).join('') : `<span class="hint">${t('side.noAddress')}</span>`}
+          ${hasDomainUrl ? `<span class="ok">${dom.certificate ? `✓ ${t('side.certOk')}` : t('dom.certWaiting')}</span>` : ''}</div></section>
+      ${state.overview?.backup?.configured ? `<section class="side-card"><h2>${t('side.backups')} <button type="button" id="side-bak-all">${t('side.all')} →</button></h2>
+        <div id="side-bak"><div class="body hint">${t('stack.loading')}</div></div></section>` : ''}`;
+  };
+  const fillSideBackups = async () => {
+    const box = document.getElementById('side-bak');
+    if (!box) return;
+    const list = await api('GET', `/api/backups/snapshots?stack=${encodeURIComponent(name)}`).catch(() => null);
+    if (!box.isConnected) return;
+    box.innerHTML = list?.length
+      ? list.slice(0, 3).map((sn) => `<div class="item"><span>${esc(fmtShort(sn.time))}</span>${sn.preUpdate ? `<span class="tag soon">${t('bak.preUpdate')}</span>` : ''}<span class="r">${fmtBytes(sn.size)}</span></div>`).join('')
+      : `<div class="body hint">${t('bak.noSnapshots')}</div>`;
+  };
 
   const tabs = {
     compose() {
       tab.innerHTML = `
+        <div class="compose-grid">
         <div class="card">
           <textarea id="ed" class="code" spellcheck="false">${esc(data.compose)}</textarea>
           <label class="check" style="margin-top:12px"><input type="checkbox" id="auto" ${data.autoVolumes ? 'checked' : ''}>
@@ -691,7 +1015,11 @@ async function renderStack(name) {
             <button class="btn primary" id="save-up">${t('edit.saveStart')}</button>
             <span class="hint hide-mobile">${t('edit.ctrlS')}</span>
           </div>
+        </div>
+        <div class="side-cards" id="side-cards">${sideCards()}</div>
         </div>`;
+      fillSideBackups();
+      tab.querySelector('#side-bak-all')?.addEventListener('click', () => showTab('backups'));
       const ed = document.getElementById('ed');
       const doSave = async (thenUp) => {
         const out = document.getElementById('save-out');
@@ -789,7 +1117,7 @@ async function renderStack(name) {
       if (currentTab !== 'backups') return;
       if (!b?.config?.configured) {
         tab.innerHTML = `<div class="card"><p class="hint">${t('bak.notConfigured')}</p>
-          <a class="btn" href="#/settings/backups">${t('bak.goSettings')}</a></div>`;
+          <a class="btn" href="#/backups">${t('bak.goSettings')}</a></div>`;
         return;
       }
       tab.innerHTML = `
@@ -866,7 +1194,7 @@ async function renderStack(name) {
       if (currentTab !== 'vpn') return;
       if (!info.tunnels.length) {
         tab.innerHTML = `<div class="card"><h2>${t('vpn.stackTitle')}</h2><p class="hint">${t('vpn.noTunnels')}</p>
-          <a class="btn" href="#/settings/vpn">${t('vpn.goSettings')}</a></div>`;
+          <a class="btn" href="#/network">${t('vpn.goSettings')}</a></div>`;
         return;
       }
       const cur = info.attach || { tunnel: '', services: [] };
@@ -927,7 +1255,7 @@ async function renderStack(name) {
       if (currentTab !== 'domain') return;
       if (!info.domain) {
         tab.innerHTML = `<div class="card"><p class="hint">${t('route.noDomain')}</p>
-          <a class="btn" href="#/settings/domains">${t('route.goSettings')}</a></div>`;
+          <a class="btn" href="#/domains">${t('route.goSettings')}</a></div>`;
         return;
       }
       let rows = info.routes.length ? info.routes.map((r) => ({ ...r })) : [];
@@ -1055,8 +1383,9 @@ async function renderStack(name) {
       const badge = document.getElementById('badge');
       if (s && badge) {
         badge.className = `badge ${s.state}`;
-        badge.textContent = stateLabel(s.state);
+        badge.textContent = `● ${stateLabel(s.state)}${s.total ? ` · ${s.running}/${s.total}` : ''}`;
       }
+      refreshOverview();
       // compose.yaml may have gained volumes declared by the image
       const fresh = await api('GET', `/api/stacks/${name}`).catch(() => null);
       if (fresh) {
@@ -1079,7 +1408,21 @@ async function renderStack(name) {
   });
 
   tabs.compose();
+  api('GET', `/api/stacks/${name}/routes`).then((info) => {
+    routesInfo = info;
+    if (currentTab === 'compose' && document.getElementById('side-cards')) {
+      document.getElementById('side-cards').innerHTML = sideCards();
+      fillSideBackups();
+      tab.querySelector('#side-bak-all')?.addEventListener('click', () => showTab('backups'));
+    }
+  }).catch(() => {});
+  fillOpenButton(name, data.containers);
   if (autostart) runAction('up');
+  if (state.pendingAction?.name === name) {
+    const { act } = state.pendingAction;
+    state.pendingAction = null;
+    if (act !== 'update' || confirm(t('upd.stackConfirm', { name }))) runAction(act);
+  }
 }
 
 // Scroll a tab bar sideways so its active tab is centred (only the bar moves, never the page).
@@ -1091,30 +1434,52 @@ function revealActiveTab(nav, smooth = false) {
   nav.scrollTo({ left: Math.max(0, left), behavior: smooth ? 'smooth' : 'auto' });
 }
 
-const SETTINGS_TABS = ['general', 'domains', 'vpn', 'updates', 'backups', 'account'];
+const SETTINGS_TABS = ['panel', 'updates', 'folders'];
 
-async function renderSettings(tab = 'general') {
-  if (!SETTINGS_TABS.includes(tab)) tab = 'general';
-  const main = document.getElementById('main');
-  main.innerHTML = `
-    <div class="head"><h1>${t('set.title')}</h1></div>
-    <nav class="tabs" aria-label="${esc(t('set.title'))}">
-      ${SETTINGS_TABS.map((k) => `<a href="#/settings/${k}" class="${k === tab ? 'on' : ''}"${k === tab ? ' aria-current="page"' : ''}>${t(`set.tab.${k}`)}</a>`).join('')}
-    </nav>
-    <div id="set-body"><p class="hint">${t('stack.loading')}</p></div>`;
-  revealActiveTab(main.querySelector('.tabs'));
+async function renderSettings(tab = 'panel') {
+  if (!SETTINGS_TABS.includes(tab)) tab = 'panel';
+  const main = frame('sub', {
+    label: t('set.title'),
+    items: SETTINGS_TABS.map((k) => ({ href: `#/settings/${k}`, label: t(`set.tab.${k}`), on: k === tab })),
+  });
+  main.innerHTML = `<div class="head"><h1>${t(`set.tab.${tab}`)}</h1></div><div id="set-body"><p class="hint">${t('stack.loading')}</p></div>`;
   const body = document.getElementById('set-body');
-  const s = await api('GET', '/api/settings');
-  if (route().page !== 'settings') return;
-  ({ general: settingsGeneral, domains: settingsDomains, vpn: settingsVpn, updates: settingsUpdates, backups: settingsBackups, account: settingsAccount })[tab](body, s);
+  try {
+    if (tab === 'panel') return await settingsPanel(body);
+    const s = await api('GET', '/api/settings');
+    if (route().tab !== tab) return;
+    (tab === 'updates' ? settingsUpdates : settingsGeneral)(body, s);
+  } catch (err) {
+    body.innerHTML = errorBox(err);
+  }
+}
+
+/** Plain pages: Backups, Domains, Account. */
+async function renderPage(page) {
+  const main = frame('page');
+  const titles = { backups: 'nav.backups', domains: 'nav.domains', account: 'acct.settings' };
+  main.innerHTML = `<div class="head"><div class="ht"><h1>${t(titles[page])}</h1><p class="lead" id="page-lead"></p></div></div><div id="set-body"><p class="hint">${t('stack.loading')}</p></div>`;
+  const body = document.getElementById('set-body');
+  if (page === 'backups') return settingsBackups(body);
+  if (page === 'domains') return settingsDomains(body);
+  return settingsAccount(body);
+}
+
+/** Network: VPN now, Pangolin later. */
+function renderNetwork(tab = 'vpn') {
+  const main = frame('sub', {
+    label: t('nav.network'),
+    items: [
+      { href: '#/network/vpn', label: 'VPN', on: true },
+      { label: 'Pangolin', soon: true },
+    ],
+  });
+  main.innerHTML = `<div class="head"><div class="ht"><h1>VPN</h1><p class="lead">${t('vpn.lead')}</p></div></div><div id="set-body"><p class="hint">${t('stack.loading')}</p></div>`;
+  settingsVpn(document.getElementById('set-body'));
 }
 
 function settingsGeneral(body, s) {
   body.innerHTML = `
-    <div class="card">
-      <h2>${t('set.language')}</h2>
-      ${langSelect('set-lang')}
-    </div>
     <form class="card" id="settings">
       <h2>${t('set.folders')}</h2>
       <p class="hint" style="margin-top:-4px">${t('set.foldersLead', { dir: esc(s.stacksDir) })}</p>
@@ -1128,7 +1493,6 @@ function settingsGeneral(body, s) {
       <div id="s-out"></div>
       <button class="btn primary">${t('set.save')}</button>
     </form>`;
-  bindLangSelect('set-lang');
   document.getElementById('settings').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
@@ -1213,7 +1577,7 @@ function settingsUpdates(body, s) {
       state.updates = await api('POST', '/api/updates/check');
       await refreshStacks();
       renderUpdateBadge();
-      if (route().page === 'settings') settingsUpdates(body, s);
+      if (route().tab === 'updates') settingsUpdates(body, s);
     } catch (err) {
       document.getElementById('upd-out').innerHTML = errorBox(err);
       e.target.disabled = false;
@@ -1221,19 +1585,7 @@ function settingsUpdates(body, s) {
     }
   });
 
-  document.getElementById('upd-apply')?.addEventListener('click', async (e) => {
-    if (!confirm(t('upd.confirm', { version: showVersion(p.latest) || t('upd.newBuildShort') }))) return;
-    e.target.disabled = true;
-    const out = document.getElementById('upd-out');
-    try {
-      await api('POST', '/api/updates/apply');
-      out.innerHTML = `<div class="notice info">${t('upd.restarting')}</div>`;
-      waitForRestart();
-    } catch (err) {
-      out.innerHTML = errorBox(err);
-      e.target.disabled = false;
-    }
-  });
+  document.getElementById('upd-apply')?.addEventListener('click', openUpdateDialog);
 
   document.getElementById('upd-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1252,10 +1604,13 @@ function settingsUpdates(body, s) {
 }
 
 // After a self-update the panel restarts. Reload as soon as a new panel process answers
-// (its bootId changes); after 20 s reload anyway – if the update is still running,
-// the reloaded page shows the notice again and keeps waiting.
+// (its bootId changes); after 30 s reload anyway – if the update is still running,
+// the reloaded page shows the notice again and keeps waiting. After the reload the
+// panel checks the version again, so no stale "new version" notice stays behind.
+const RESTART_FALLBACK_MS = 30e3;
+const JUST_UPDATED_KEY = 'sm-just-updated';
 let restartTimer = null;
-function waitForRestart() {
+function waitForRestart(beforeReload) {
   if (restartTimer) return;
   const before = state.bootId;
   const started = Date.now();
@@ -1263,21 +1618,17 @@ function waitForRestart() {
     let st = null;
     try { st = await fetch('/api/state', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)); } catch { /* panel is down */ }
     // Reload only when the panel answers – never onto an error page while it is down.
-    if (st && (st.bootId !== before || Date.now() - started >= 20e3)) {
+    if (st && (st.bootId !== before || Date.now() - started >= RESTART_FALLBACK_MS)) {
       clearInterval(restartTimer);
-      location.reload();
+      try { sessionStorage.setItem(JUST_UPDATED_KEY, '1'); } catch { /* ignore */ }
+      beforeReload?.();
+      setTimeout(() => location.reload(), 400);
     }
   }, 2000);
 }
 
 // ---------- VPN ----------
 
-const ago = (iso) => {
-  const s = Math.round((Date.now() - Date.parse(iso)) / 1000);
-  if (s < 60) return t('vpn.agoS', { n: s });
-  if (s < 3600) return t('vpn.agoM', { n: Math.round(s / 60) });
-  return t('vpn.agoH', { n: Math.round(s / 3600) });
-};
 
 async function settingsVpn(body) {
   let d;
@@ -1287,13 +1638,13 @@ async function settingsVpn(body) {
     body.innerHTML = errorBox(err);
     return;
   }
-  if (route().tab !== 'vpn') return;
+  if (route().page !== 'network') return;
   const pill = (st) => {
     const k = st?.state || 'unknown';
     return `<span class="badge ${k === 'up' ? 'running' : k === 'down' ? 'exited' : 'partial'}">${t(`vpn.state.${k}`)}</span>`;
   };
   const card = (x) => `
-    <div class="card vpn-card" data-name="${esc(x.name)}">
+    <div class="card vpn-card ${x.stacks.length ? 'strong' : ''}" data-name="${esc(x.name)}">
       <div class="row" style="justify-content:space-between;align-items:center">
         <h2 style="margin:0">${esc(x.name)}</h2>${pill(x.status)}
       </div>
@@ -1317,11 +1668,8 @@ async function settingsVpn(body) {
       <pre class="terminal" hidden></pre>
     </div>`;
   body.innerHTML = `
-    <div class="card">
-      <h2>${t('vpn.title')}</h2>
-      <p class="hint" style="margin-top:-4px">${t('vpn.lead')}</p>
-    </div>
-    ${d.tunnels.map(card).join('')}
+    <div class="notice plain">${t('vpn.killSwitchNote')}</div>
+    ${d.tunnels.length ? `<div class="vpn-cards">${d.tunnels.map(card).join('')}</div>` : ''}
     <form class="card" id="vpn-add">
       <h2>${t('vpn.addTitle')}</h2>
       <div class="field"><label for="vpn-name">${t('vpn.name')}</label>
@@ -1330,7 +1678,6 @@ async function settingsVpn(body) {
         <textarea id="vpn-conf" class="code env" spellcheck="false" placeholder="[Interface]&#10;PrivateKey = …&#10;Address = 10.8.0.5/32&#10;&#10;[Peer]&#10;PublicKey = …&#10;Endpoint = vpn.example.com:51820&#10;AllowedIPs = 0.0.0.0/0" required></textarea>
         <input type="file" id="vpn-file" accept=".conf,text/plain" style="margin-top:8px">
         <p class="hint">${t('vpn.confHint')}</p></div>
-      <div class="notice info" style="margin-bottom:12px">${t('vpn.killSwitchNote')}</div>
       <div id="vpn-add-out"></div>
       <button class="btn primary">${t('vpn.add')}</button>
       <pre class="terminal" id="vpn-add-term" hidden style="margin-top:12px"></pre>
@@ -1358,19 +1705,19 @@ async function settingsVpn(body) {
       name: document.getElementById('vpn-name').value, conf: document.getElementById('vpn-conf').value,
     });
     e.submitter.disabled = false;
-    if (code === 0) setTimeout(() => { if (route().tab === 'vpn') settingsVpn(body); }, 4000);
+    if (code === 0) setTimeout(() => { if (route().page === 'network') settingsVpn(body); }, 4000);
   });
   body.querySelectorAll('.vpn-card').forEach((c) => {
     const name = c.dataset.name;
     const pre = c.querySelector('pre');
     c.querySelector('[data-act="restart"]').addEventListener('click', async () => {
       await run(pre, 'POST', `/api/vpn/${name}/restart`);
-      setTimeout(() => { if (route().tab === 'vpn') settingsVpn(body); }, 5000);
+      setTimeout(() => { if (route().page === 'network') settingsVpn(body); }, 5000);
     });
     c.querySelector('[data-act="conf"]').addEventListener('click', () => { c.querySelector('.vpn-conf-box').hidden = false; });
     c.querySelector('[data-act="saveconf"]').addEventListener('click', async () => {
       const code = await run(pre, 'PUT', `/api/vpn/${name}`, { conf: c.querySelector('textarea').value });
-      if (code === 0) setTimeout(() => { if (route().tab === 'vpn') settingsVpn(body); }, 4000);
+      if (code === 0) setTimeout(() => { if (route().page === 'network') settingsVpn(body); }, 4000);
     });
     c.querySelector('[data-act="remove"]').addEventListener('click', async () => {
       if (!confirm(t('vpn.removeConfirm', { name }))) return;
@@ -1385,7 +1732,7 @@ async function settingsVpn(body) {
   });
   // While a tunnel is connecting, look again in a moment.
   if (d.tunnels.some((x) => x.status?.state === 'connecting')) {
-    setTimeout(() => { if (route().tab === 'vpn' && body.isConnected) settingsVpn(body); }, 10_000);
+    setTimeout(() => { if (route().page === 'network' && body.isConnected) settingsVpn(body); }, 10_000);
   }
 }
 
@@ -1561,43 +1908,63 @@ async function settingsDomains(body) {
     body.innerHTML = errorBox(err);
     return;
   }
-  if (route().page !== 'settings') return;
+  if (route().page !== 'domains') return;
   const st = d.status || {};
-  const panelBox = !d.domain ? '' : `
-    <form class="card" id="panel-form">
-      <h2>${t('dom.panelTitle')}</h2>
+  const routes = d.routes || [];
+  body.innerHTML = `
+    <div class="two-col" style="margin-bottom:24px">
+      <div class="card wide">
+        <h2>${t('dom.title')}</h2>
+        <p class="hint" style="margin-top:-4px">${t('dom.lead')}</p>
+        <div id="dom-form-box"></div>
+      </div>
+      ${st.enabled ? '<div class="card strong" id="dom-status"></div>' : ''}
+    </div>
+    ${d.domain ? `<section><h2>${t('dom.routesTitle')}</h2>
+      ${routes.length ? `<div class="card" style="padding:0;overflow-x:auto"><table>
+        <thead><tr><th>${t('dom.routeAddr')}</th><th>${t('dom.routeTarget')}</th><th></th></tr></thead>
+        <tbody>${routes.map((r) => {
+          const vpnOn = state.stacks.find((x) => x.name === r.stack)?.vpn;
+          return `<tr><td><a href="https://${esc(r.subdomain)}.${esc(d.domain)}" target="_blank" rel="noopener">${esc(r.subdomain)}.${esc(d.domain)}</a></td>
+            <td><code><a href="#/stack/${esc(r.stack)}">${esc(r.stack)}</a> → ${esc(r.service)}:${esc(r.port)}</code></td>
+            <td>${vpnOn ? `<span class="tag">${t('dom.viaVpn', { name: esc(vpnOn.tunnel) })}</span>` : ''}</td></tr>`;
+        }).join('')}</tbody></table></div>` : `<p class="hint">${t('dom.routesNone')}</p>`}
+      <p class="hint">${t('dom.routesHint')}</p></section>` : ''}`;
+  domainForm(document.getElementById('dom-form-box'), d, {
+    onApplied: () => setTimeout(() => { if (route().page === 'domains') settingsDomains(body); }, 8000),
+  });
+  if (st.enabled) domainStatus(document.getElementById('dom-status'), d, st);
+}
+
+/** Settings → Panel address: my.<domain>, and the lock to that address. */
+async function settingsPanel(body) {
+  const d = await api('GET', '/api/domains');
+  if (route().tab !== 'panel') return;
+  if (!d.domain) {
+    body.innerHTML = `<div class="card"><p class="hint" style="margin-top:0">${t('dom.panelNoDomain')}</p>
+      <a class="btn" href="#/domains">${t('route.goSettings')}</a></div>`;
+    return;
+  }
+  body.innerHTML = `
+    <form class="card strong" id="panel-form">
       <div class="field"><label for="dom-panel">${t('dom.panelSub')}</label>
-        <div class="row" style="align-items:center;gap:6px;flex-wrap:nowrap">
-          <input type="text" id="dom-panel" value="${esc(d.panelSubdomain)}" placeholder="my" autocapitalize="off" autocomplete="off" style="flex:1;min-width:0">
-          <span class="hint" style="white-space:nowrap">.${esc(d.domain)}</span>
+        <div class="row" style="align-items:center;gap:8px;flex-wrap:nowrap">
+          <input type="text" id="dom-panel" value="${esc(d.panelSubdomain)}" placeholder="my" autocapitalize="off" autocomplete="off" style="flex:0 1 220px;min-width:0">
+          <span class="hint" style="white-space:nowrap;margin:0">.${esc(d.domain)}</span>
         </div>
         <p class="hint">${t('dom.panelSubHint')}</p>
         <div id="dom-lock"></div></div>
       <div id="panel-out"></div>
       <button class="btn primary">${t('dom.panelSave')}</button>
     </form>`;
-
-  body.innerHTML = `
-    ${panelBox}
-    ${st.enabled ? '<div class="card" id="dom-status"></div>' : ''}
-    <div class="card">
-      <h2>${t('dom.title')}</h2>
-      <p class="hint" style="margin-top:-4px">${t('dom.lead')}</p>
-      <div id="dom-form-box"></div>
-    </div>`;
-  domainForm(document.getElementById('dom-form-box'), d, {
-    onApplied: () => setTimeout(() => { if (route().tab === 'domains') settingsDomains(body); }, 8000),
-  });
-
   // The IP lock can only be switched on from the panel's own address (proof that it works).
   const drawLock = () => {
     const box = document.getElementById('dom-lock');
     if (!box) return;
-    const domain = d.domain;
     const sub = document.getElementById('dom-panel').value.trim().toLowerCase();
     if (!sub) { box.innerHTML = ''; return; }
-    const url = `https://${sub}.${domain}`;
-    const here = location.hostname === `${sub}.${domain}`;
+    const url = `https://${sub}.${d.domain}`;
+    const here = location.hostname === `${sub}.${d.domain}`;
     const prev = document.getElementById('dom-lock-on');
     const checked = prev ? prev.checked : d.panelDomainOnly;
     box.innerHTML = `
@@ -1606,8 +1973,8 @@ async function settingsDomains(body) {
       <p class="hint">${here || d.panelDomainOnly ? t('dom.lockHint') : t('dom.lockOpenFirst', { url: esc(url) })}</p>`;
   };
   drawLock();
-  document.getElementById('dom-panel')?.addEventListener('input', drawLock);
-  document.getElementById('panel-form')?.addEventListener('submit', async (e) => {
+  document.getElementById('dom-panel').addEventListener('input', drawLock);
+  document.getElementById('panel-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const out = document.getElementById('panel-out');
     try {
@@ -1616,12 +1983,11 @@ async function settingsDomains(body) {
         panelDomainOnly: Boolean(document.getElementById('dom-lock-on')?.checked),
       });
       toast(t('toast.saved'));
-      settingsDomains(body);
+      settingsPanel(body);
     } catch (err) {
       out.innerHTML = errorBox(err);
     }
   });
-  if (st.enabled) domainStatus(document.getElementById('dom-status'), d, st);
 }
 
 /**
@@ -1699,6 +2065,18 @@ const fmtBytes = (n) => {
 const WEEK = [1, 2, 3, 4, 5, 6, 0];
 const dayName = (d) => new Intl.DateTimeFormat(lang === 'pl' ? 'pl-PL' : 'en-GB', { weekday: 'short' })
   .format(new Date(Date.UTC(2026, 0, 4 + d))); // 2026-01-04 was a Sunday
+
+/** When the next scheduled backup runs (in this browser's time zone), or null. */
+function nextBackup(c) {
+  if (!c?.enabled || !c.days?.length || !/^\d{1,2}:\d{2}$/.test(c.time || '')) return null;
+  const [h, m] = c.time.split(':').map(Number);
+  const now = new Date();
+  for (let i = 0; i < 8; i += 1) {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i, h, m);
+    if (d > now && c.days.includes(d.getDay())) return d;
+  }
+  return null;
+}
 
 /** Shows the running backup job's log in `pre` until it finishes, then calls done(). */
 function watchBackupJob(pre, done) {
@@ -1799,7 +2177,7 @@ function runsTable(box, runs, onDone) {
       <details class="run" ${i === 0 ? 'open' : ''}>
         <summary>
           <span class="run-date">${fmtDate(r.time)}</span>
-          <span class="badge ${r.kind === 'pre-update' ? 'partial' : 'running'}">${esc(t(`bak.kind.${r.kind}`))}</span>
+          <span class="tag ${r.kind === 'pre-update' ? 'soon' : ''}">${esc(t(`bak.kind.${r.kind}`))}</span>
           <span class="hint">${t('bak.runStacks', { n: r.stacks.length })}${r.system ? ` · ${t('bak.runSettings')}` : ''}</span>
           <span class="hint run-size">${fmtBytes(r.size)}</span>
         </summary>
@@ -1887,36 +2265,52 @@ async function settingsBackups(body) {
     body.innerHTML = errorBox(err);
     return;
   }
-  if (route().page !== 'settings') return;
+  if (route().page !== 'backups') return;
   const c = d.config;
   const st = d.status;
   const last = st.history?.find((h) => h.kind !== 'restore' && h.kind !== 'verify');
   const verify = st.verifyData || st.verify;
 
-  const statusBox = !c.configured ? '' : `
-    <div class="card">
-      <h2>${t('bak.status')}</h2>
-      <div class="kv">
-        <span>${t('bak.lastRun')}</span><strong>${last ? `${last.ok ? '✓' : '✕'} ${fmtDate(last.at)}` : t('upd.never')}</strong>
-        <span>${t('bak.checksums')}</span><strong>${verify ? `${verify.ok ? '✓' : '✕'} ${fmtDate(verify.at)} · ${t(`bak.mode.${verify.mode}`)}` : t('upd.never')}</strong>
-        <span>${t('bak.schedule')}</span><strong>${c.enabled && c.days.length ? `${WEEK.filter((x) => c.days.includes(x)).map(dayName).join(', ')} · ${esc(c.time)}` : t('bak.off')}</strong>
-      </div>
-      ${verify && !verify.ok ? `<div class="notice error">${t('bak.verifyBad')}\n${esc(verify.error || '')}</div>` : ''}
-      <div class="row">
+  const next = nextBackup(c);
+  const destName = c.destinations.find((x) => x.id === c.destination)?.name || '';
+  const lead = document.getElementById('page-lead');
+  if (lead) {
+    lead.textContent = c.configured
+      ? [destName, c.bucket, c.enabled && c.days.length ? `${WEEK.filter((x) => c.days.includes(x)).map(dayName).join(', ')} ${c.time}` : t('bak.off')].filter(Boolean).join(' · ')
+      : t('bak.lead');
+  }
+  if (c.configured) {
+    document.querySelector('.head')?.insertAdjacentHTML('beforeend', `
+      <div class="actions">
+        <button type="button" class="btn" id="bak-open-settings">${t('bak.settingsBtn')}</button>
         <button type="button" class="btn primary" id="bak-run">${t('bak.runNow')}</button>
-        <button type="button" class="btn" id="bak-verify" title="${esc(t('bak.verifyTitle'))}">${t('bak.verifyNow')}</button>
-      </div>
-      <pre class="terminal" id="bak-log" hidden></pre>
-      ${st.history?.length ? `<details style="margin-top:12px"><summary>${t('bak.history')}</summary>
+      </div>`);
+  }
+  const statusBox = !c.configured ? '' : `
+    <section class="summary" aria-label="${esc(t('bak.status'))}">
+      <div><span class="k">${t('bak.lastRun')}</span><span class="v">${last ? `${ago(last.at)} <small class="${last.ok ? 'ok' : 'bad'}">${last.ok ? `✓ ${t('bak.okWord')}` : `✕ ${t('bak.failedWord')}`}</small>` : t('upd.never')}</span></div>
+      <div><span class="k">${t('bak.next')}</span><span class="v">${next ? esc(fmtShort(next.toISOString())) : t('bak.off')}</span></div>
+      <div><span class="k">${t('bak.checksums')}</span><span class="v">${verify ? `${ago(verify.at)} <small class="${verify.ok ? 'ok' : 'bad'}">${verify.ok ? '✓' : '✕'} ${t(`bak.mode.${verify.mode}`)}</small>` : t('upd.never')}</span></div>
+      <div><span class="k">${t('bak.lastSize')}</span><span class="v">${state.overview?.backup?.lastSize ? fmtBytes(state.overview.backup.lastSize) : '—'}</span></div>
+    </section>
+    ${verify && !verify.ok ? `<div class="notice error">${t('bak.verifyBad')}\n${esc(verify.error || '')}</div>` : ''}
+    <div class="row" style="margin-bottom:16px">
+      <button type="button" class="btn small" id="bak-verify" title="${esc(t('bak.verifyTitle'))}">${t('bak.verifyNow')}</button>
+      ${st.history?.length ? `<details><summary>${t('bak.history')}</summary>
         <table><tbody>${st.history.map(backupRunLabel).join('')}</tbody></table></details>` : ''}
-    </div>`;
+    </div>
+    <pre class="terminal" id="bak-log" hidden style="margin-bottom:16px"></pre>
+    <section style="margin-bottom:24px"><div class="row" style="justify-content:space-between;margin-bottom:10px"><h2 style="margin:0">${t('bak.runsTitle')}</h2>
+      <button type="button" class="btn small" id="bk-refresh" title="${esc(t('bak.refreshTitle'))}">${t('logs.refresh')}</button></div>
+      <div id="bk-snaps"><p class="hint">${t('stack.loading')}</p></div></section>`;
 
   const destOptions = c.destinations.map((x) => `<option value="${esc(x.id)}" ${x.id === c.destination ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
   body.innerHTML = `
     ${statusBox}
-    <form class="card" id="bak-form">
+    <details class="card" id="bak-settings" ${c.configured ? '' : 'open'}>
+    <summary><strong style="color:var(--text)">${t('bak.settingsBtn')}</strong></summary>
+    <form id="bak-form" style="margin-top:16px">
       <h2>${t('bak.storage')}</h2>
-      <p class="hint" style="margin-top:-4px">${t('bak.lead')}</p>
       <div class="field"><label for="bk-dest">${t('bak.destination')}</label>
         <select id="bk-dest" class="lang">${destOptions}</select>
         <p class="hint" id="bk-help"></p></div>
@@ -1967,9 +2361,12 @@ async function settingsBackups(body) {
       <div id="bk-out"></div>
       <button class="btn primary">${t('bak.saveTest')}</button>
     </form>
-    ${c.configured ? `<div class="card"><div class="row" style="justify-content:space-between;margin-bottom:8px"><h2 style="margin:0">${t('bak.snapshots')}</h2>
-      <button type="button" class="btn small" id="bk-refresh" title="${esc(t('bak.refreshTitle'))}">${t('logs.refresh')}</button></div>
-      <div id="bk-snaps"><p class="hint">${t('stack.loading')}</p></div></div>` : ''}`;
+    </details>`;
+  document.getElementById('bak-open-settings')?.addEventListener('click', () => {
+    const det = document.getElementById('bak-settings');
+    det.open = true;
+    det.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
 
   // Destination presets: help text, and the address filled in from the region.
   const epFor = (dest, region) => (dest?.endpoint && !dest.endpoint.includes('<') ? dest.endpoint.replace('{region}', region) : '');
@@ -2039,19 +2436,23 @@ async function settingsBackups(body) {
       out.innerHTML = `<p class="hint">${t('bak.testing')}</p>`;
       const r = await api('POST', '/api/backups/test');
       toast(t(r.created ? 'bak.repoCreated' : 'bak.repoOk'));
-      settingsBackups(body);
+      renderPage('backups');
     } catch (err) {
       out.innerHTML = errorBox(err);
     }
   });
 
   const startJob = async (url) => {
-    document.getElementById('bak-run').disabled = true;
-    document.getElementById('bak-verify').disabled = true;
+    const runBtn = document.getElementById('bak-run');
+    const verBtn = document.getElementById('bak-verify');
+    if (runBtn) runBtn.disabled = true;
+    if (verBtn) verBtn.disabled = true;
     if (url) { try { await api('POST', url); } catch (err) { toast(err.message); } }
-    watchBackupJob(document.getElementById('bak-log'), (s2) => {
+    const logEl = document.getElementById('bak-log');
+    if (!logEl) return;
+    watchBackupJob(logEl, (s2) => {
       toast(t(s2.history?.[0]?.ok ? 'toast.done' : 'toast.failed'));
-      setTimeout(() => { if (route().tab === 'backups') settingsBackups(body); }, 1500);
+      setTimeout(() => { if (route().page === 'backups') { renderPage('backups'); refreshOverview(); } }, 1500);
     });
   };
   document.getElementById('bak-run')?.addEventListener('click', () => startJob('/api/backups/run'));
@@ -2062,7 +2463,7 @@ async function settingsBackups(body) {
   const loadAll = async (fresh = false) => {
     if (fresh) snapsBox.innerHTML = `<p class="hint">${t('stack.loading')}</p>`;
     const list = await api('GET', `/api/backups/runs${fresh ? '?fresh=1' : ''}`).catch((err) => { snapsBox.innerHTML = errorBox(err); return null; });
-    if (list && route().tab === 'backups') runsTable(snapsBox, list.filter((r) => r.stacks.length), () => loadAll());
+    if (list && route().page === 'backups') runsTable(snapsBox, list.filter((r) => r.stacks.length), () => loadAll());
   };
   if (snapsBox) {
     document.getElementById('bk-refresh').addEventListener('click', () => loadAll(true));
@@ -2072,50 +2473,182 @@ async function settingsBackups(body) {
 
 function settingsAccount(body) {
   body.innerHTML = `
-    <form class="card" id="pw">
-      <h2>${t('pw.title')}</h2>
+    <form class="card strong" id="pw" style="max-width:720px">
+      <h2>${t('acct.security')}</h2>
+      <p class="hint" style="margin-top:-4px">${t('acc.signedInAs', { user: esc(state.user?.username || '') })}</p>
       <div class="field"><label for="cur">${t('pw.current')}</label><input type="password" id="cur" autocomplete="current-password" required></div>
-      <div class="field"><label for="nw">${t('pw.new')}</label><input type="password" id="nw" autocomplete="new-password" minlength="10" required></div>
+      <div class="row field" style="align-items:flex-start">
+        <div style="flex:1;min-width:200px"><label for="nw">${t('pw.new')}</label><input type="password" id="nw" autocomplete="new-password" minlength="10" required></div>
+        <div style="flex:1;min-width:200px"><label for="nw2">${t('pw.repeat')}</label><input type="password" id="nw2" autocomplete="new-password" minlength="10" required></div>
+      </div>
       <div id="pw-out"></div>
-      <button class="btn">${t('pw.submit')}</button>
+      <button class="btn primary">${t('pw.submit')}</button>
     </form>
-    <div class="card phone-only">
-      <h2>${t('nav.logout')}</h2>
-      <p class="hint">${t('acc.signedInAs', { user: esc(state.user?.username || '') })}</p>
-      <button type="button" class="btn" id="acc-logout">${t('nav.logout')}</button>
+    <div class="card" style="max-width:720px">
+      <h2>${t('set.language')}</h2>
+      <label for="acc-lang">${t('acct.langLabel')}</label>
+      <div style="max-width:320px">${langSelect('acc-lang')}</div>
     </div>`;
-  document.getElementById('acc-logout').addEventListener('click', async () => {
-    await api('POST', '/api/logout').catch(() => {});
-    state.user = null;
-    render();
-  });
+  bindLangSelect('acc-lang');
   document.getElementById('pw').addEventListener('submit', async (e) => {
     e.preventDefault();
+    const out = document.getElementById('pw-out');
+    if (document.getElementById('nw').value !== document.getElementById('nw2').value) {
+      out.innerHTML = `<div class="notice error">${t('pw.mismatch')}</div>`;
+      return;
+    }
     try {
       await api('POST', '/api/password', { current: document.getElementById('cur').value, next: document.getElementById('nw').value });
       e.target.reset();
-      document.getElementById('pw-out').innerHTML = '';
+      out.innerHTML = '';
       toast(t('pw.done'));
     } catch (err) {
-      document.getElementById('pw-out').innerHTML = errorBox(err);
+      out.innerHTML = errorBox(err);
     }
   });
 }
 
+// ---------- new panel version: banner, status bar, dialog ----------
+
+const UPD_HIDE_KEY = 'sm-upd-hide';
+const hiddenFor = () => { try { return localStorage.getItem(UPD_HIDE_KEY); } catch { return null; } };
+const updKey = (p) => (p ? `${p.latest || ''}|${p.buildUpdate ? 'build' : ''}` : '');
+
 function renderUpdateBadge() {
-  const el = document.getElementById('panel-update');
+  renderStatusbar();
+  const el = document.getElementById('update-banner');
   if (!el) return;
   const p = state.updates?.panel;
-  el.hidden = !p?.updateAvailable;
-  el.textContent = p?.updateAvailable
-    ? (p.buildUpdate ? t('upd.badgeBuild') : t('upd.badge', { version: showVersion(p.latest) }))
-    : t('upd.badgeBuild');
+  if (!p?.updateAvailable || hiddenFor() === updKey(p) || state.updating) { el.innerHTML = ''; return; }
+  const what = p.buildUpdate ? t('upd.newBuild') : t('upd.bannerTitle', { version: esc(showVersion(p.latest)) });
+  el.innerHTML = `
+    <div class="update-banner" role="status">
+      ${svg(ICON.up)}
+      <span><strong>${what}</strong> <span class="muted">· ${t('upd.youHave', { version: esc(state.version) })}</span></span>
+      <a href="#" id="upd-notes">${t('upd.whatsNew')}</a>
+      <div class="acts">
+        <button type="button" class="btn" id="upd-open">${t('upd.updateBtn')}</button>
+        <button type="button" class="btn close" id="upd-hide" aria-label="${esc(t('upd.hideBanner'))}" title="${esc(t('upd.hideBanner'))}">×</button>
+      </div>
+    </div>`;
+  el.querySelector('#upd-notes').addEventListener('click', (e) => { e.preventDefault(); openUpdateDialog(); });
+  el.querySelector('#upd-open').addEventListener('click', openUpdateDialog);
+  el.querySelector('#upd-hide').addEventListener('click', () => {
+    try { localStorage.setItem(UPD_HIDE_KEY, updKey(p)); } catch { /* ignore */ }
+    el.innerHTML = '';
+  });
+}
+
+/** Release notes (Markdown from the release) as simple HTML: headings, lists, paragraphs. */
+function notesHtml(md) {
+  const out = [];
+  let list = false;
+  const inline = (x) => esc(x).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code>$1</code>');
+  for (const raw of String(md || '').split('\n')) {
+    const line = raw.trim();
+    const li = line.match(/^[-*]\s+(.*)$/);
+    if (li) { if (!list) { out.push('<ul>'); list = true; } out.push(`<li>${inline(li[1])}</li>`); continue; }
+    if (list) { out.push('</ul>'); list = false; }
+    if (!line) continue;
+    const h = line.match(/^#{1,6}\s+(.*)$/);
+    out.push(h ? `<h4>${inline(h[1])}</h4>` : `<p>${inline(line)}</p>`);
+  }
+  if (list) out.push('</ul>');
+  return out.join('');
+}
+
+function closeDialog() {
+  document.getElementById('dialog')?.remove();
+}
+
+function openUpdateDialog() {
+  const u = state.updates || {};
+  const p = u.panel || {};
+  if (!p.updateAvailable) { location.hash = '#/settings/updates'; return; }
+  const mode = u.self?.mode || 'none';
+  const target = p.buildUpdate ? t('upd.newBuildShort') : showVersion(p.latest);
+  closeDialog();
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="overlay" id="dialog">
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title">
+        <div class="dh">
+          <h2 id="dlg-title">${t('upd.dialogTitle')}</h2>
+          <span class="ver">${esc(state.version)} → <strong>${esc(target)}</strong></span>
+          <button type="button" class="x" id="dlg-x" aria-label="${esc(t('upd.close'))}">×</button>
+        </div>
+        <div class="db">
+          <div class="notes">
+            <h3>${t('upd.whatsNew')}</h3>
+            <div class="scroll">${p.notes ? notesHtml(p.notes) : `<p class="hint">${t('upd.noNotes')}</p>`}</div>
+            ${p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener" style="display:inline-block;margin-top:8px;font-size:13px">${t('upd.fullNotes')} ↗</a>` : ''}
+          </div>
+          ${mode === 'compose'
+            ? `<div class="notice" style="margin:0"><div>${t('upd.dialogKeep')}</div><div class="hint" style="margin-top:4px">${t('upd.dialogReload')}</div></div>`
+            : `<div class="notice" style="margin:0">${t(`upd.how.${mode}`, { tag: esc(u.self?.tag || '') })}</div>`}
+          <div id="dlg-out"></div>
+        </div>
+        <div class="df">
+          <button type="button" class="btn" id="dlg-later">${t('upd.later')}</button>
+          ${mode === 'compose' ? `<button type="button" class="btn primary" id="dlg-go">${t('upd.updateNow')}</button>` : ''}
+        </div>
+      </div>
+    </div>`);
+  const dlg = document.getElementById('dialog');
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) closeDialog(); });
+  dlg.querySelector('#dlg-x').addEventListener('click', closeDialog);
+  dlg.querySelector('#dlg-later').addEventListener('click', closeDialog);
+  dlg.querySelector('#dlg-x').focus();
+  dlg.querySelector('#dlg-go')?.addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    try {
+      await api('POST', '/api/updates/apply');
+    } catch (err) {
+      dlg.querySelector('#dlg-out').innerHTML = errorBox(err);
+      e.target.disabled = false;
+      return;
+    }
+    showUpdateProgress(target);
+  });
+}
+
+/** While the panel updates itself: steps, then the page reloads on its own. */
+function showUpdateProgress(target) {
+  closeDialog();
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="overlay" id="dialog">
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title" style="max-width:460px">
+        <div class="db">
+          <h2 id="dlg-title" style="margin:0;font-size:18px">${t('upd.progressTitle', { version: esc(target) })}</h2>
+          <div class="progress"><span id="upd-bar" style="width:15%"></span></div>
+          <ol class="steps" id="upd-steps">
+            <li class="done">${t('upd.stepStarted')}</li>
+            <li class="now">${t('upd.stepWaiting')}</li>
+            <li class="todo">${t('upd.stepReload')}</li>
+            <li class="todo">${t('upd.stepCheck')}</li>
+          </ol>
+          <p class="hint" style="margin:0">${t('upd.progressHint')}</p>
+        </div>
+      </div>
+    </div>`);
+  const started = Date.now();
+  const bar = document.getElementById('upd-bar');
+  const timer = setInterval(() => {
+    if (!bar.isConnected) { clearInterval(timer); return; }
+    bar.style.width = `${Math.min(90, 15 + ((Date.now() - started) / RESTART_FALLBACK_MS) * 75)}%`;
+  }, 500);
+  waitForRestart(() => {
+    const steps = document.querySelectorAll('#upd-steps li');
+    steps[1].className = 'done';
+    steps[2].className = 'now';
+    bar.style.width = '100%';
+  });
 }
 
 // ---------- start ----------
 
 function render() {
   stopStream();
+  closeDialog();
   if (!state.user) {
     clearInterval(state.refreshTimer);
     state.refreshTimer = null;
@@ -2123,16 +2656,14 @@ function render() {
   }
   if (state.afterSetup) return renderAccessStep();
   renderShell();
+  window.scrollTo(0, 0);
   const r = route();
-  document.querySelectorAll('.bottom-nav a').forEach((a) => {
-    const on = a.dataset.nav === (r.page === 'settings' ? 'settings' : 'home');
-    a.classList.toggle('on', on);
-    if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
-  });
   if (r.page === 'new') renderNew();
-  else if (r.page === 'settings') renderSettings(r.tab);
   else if (r.page === 'stack') renderStack(r.name);
-  else renderHome();
+  else if (r.page === 'settings') renderSettings(r.tab);
+  else if (r.page === 'network') renderNetwork(r.tab);
+  else if (r.page === 'backups' || r.page === 'domains' || r.page === 'account') renderPage(r.page);
+  else { frame('page'); renderHome(); }
 }
 
 async function boot() {
@@ -2148,12 +2679,22 @@ async function boot() {
   if (state.user) {
     state.stacks = await api('GET', '/api/stacks').catch(() => []);
     state.updates = await api('GET', '/api/updates').catch(() => null);
+    state.overview = await api('GET', '/api/overview').catch(() => null);
     clearInterval(state.refreshTimer);
     state.refreshTimer = setInterval(refreshStacks, 10_000);
   }
   render();
   // Opened (or reloaded) while a self-update is still running: keep waiting for the new panel.
-  if (state.user && state.updating) waitForRestart();
+  if (state.user && state.updating) {
+    const p = state.updates?.panel;
+    showUpdateProgress(p?.latest && !p.buildUpdate ? showVersion(p.latest) : t('upd.newBuildShort'));
+  }
+  // Just reloaded after a self-update: ask again which version is the newest.
+  let justUpdated = false;
+  try { justUpdated = sessionStorage.getItem(JUST_UPDATED_KEY) === '1'; sessionStorage.removeItem(JUST_UPDATED_KEY); } catch { /* ignore */ }
+  if (state.user && justUpdated && !state.updating) {
+    api('POST', '/api/updates/check').then((u) => { state.updates = u; renderUpdateBadge(); }).catch(() => {});
+  }
 }
 
 window.addEventListener('hashchange', render);
