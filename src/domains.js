@@ -8,6 +8,7 @@ import { UserError } from './errors.js';
 import { encrypt, decrypt, mask } from './secrets.js';
 import { PROVIDERS, providerById, providerJson, defaultPropagation } from './dns-providers.js';
 import { publishedPorts, findConflicts } from './ports.js';
+import { proxyRoute } from './proxies.js';
 import { certErrors } from './caddy-logs.js';
 import { VERSION, isSemver } from './version.js';
 import { checkDomain, upsertRecord, supportsAutoRecord, isIPv4 } from './dns-records.js';
@@ -261,7 +262,8 @@ export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings
     if (!s.domain) throw new UserError('dns.noDomain');
     const panelSubdomain = String(body.panelSubdomain ?? '').trim().toLowerCase();
     if (panelSubdomain && !SUBDOMAIN_RE.test(panelSubdomain)) throw new UserError('dns.badSubdomain', { sub: panelSubdomain });
-    if (panelSubdomain && db.prepare('SELECT 1 FROM routes WHERE subdomain = ?').get(panelSubdomain)) {
+    if (panelSubdomain && (db.prepare('SELECT 1 FROM routes WHERE subdomain = ?').get(panelSubdomain)
+      || db.prepare('SELECT 1 FROM proxies WHERE subdomain = ?').get(panelSubdomain))) {
       throw new UserError('dns.subdomainTaken', { sub: panelSubdomain });
     }
     const panelDomainOnly = Boolean(body.panelDomainOnly) && Boolean(panelSubdomain);
@@ -304,7 +306,7 @@ export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings
       if (!SUBDOMAIN_RE.test(subdomain)) throw new UserError('dns.badSubdomain', { sub: subdomain });
       if (seen.has(subdomain) || subdomain === s.panelSubdomain) throw new UserError('dns.subdomainTaken', { sub: subdomain });
       const other = db.prepare('SELECT stack FROM routes WHERE subdomain = ? AND stack != ?').get(subdomain, stack);
-      if (other) throw new UserError('dns.subdomainTaken', { sub: subdomain });
+      if (other || db.prepare('SELECT 1 FROM proxies WHERE subdomain = ?').get(subdomain)) throw new UserError('dns.subdomainTaken', { sub: subdomain });
       if (!services.includes(service)) throw new UserError('dns.badService', { service });
       if (!Number.isInteger(port) || port < 1 || port > 65535) throw new UserError('dns.badPort');
       seen.add(subdomain);
@@ -381,6 +383,13 @@ export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings
     return r.code === 0 ? r.stdout.trim().replace(/^\//, '') : null;
   }
 
+  function proxyRows() {
+    try {
+      return db.prepare('SELECT * FROM proxies ORDER BY subdomain').all()
+        .map((r) => ({ ...r, insecure: Boolean(r.insecure), hostHeader: Boolean(r.host_header) }));
+    } catch { return []; } // a database from before proxies existed
+  }
+
   async function buildConfig() {
     const s = getSettings();
     const hostRoutes = [];
@@ -430,6 +439,8 @@ export function createDomains({ db, stacks, stacksDir, getSettings, saveSettings
                   handle: [{ handler: 'reverse_proxy', upstreams: [{ dial: r.dial }] }],
                   terminal: true,
                 })),
+                // Servers outside Stackmoor (Proxmox, a router…).
+                ...proxyRows().map((x) => proxyRoute(x, s.domain)),
                 // The bare domain leads to the panel (when it has an address).
                 ...(s.panelSubdomain ? [{
                   match: [{ host: [s.domain] }],

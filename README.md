@@ -56,6 +56,7 @@ Give every stack an address like `cloud.home.example.com` with a real HTTPS cert
 1. **Right after installing** (or later in the **Domains** tab): enter your domain, pick your DNS provider (Cloudflare, Bunny, OVHcloud, Hetzner, DigitalOcean, Porkbun, Namecheap, GoDaddy, IONOS, netcup, Gandi, AWS Route 53, deSEC, DuckDNS) and paste its API key. Keys are stored encrypted.
 2. The DNS records `home.example.com` and `*.home.example.com` → the server's local IP are **added automatically** for Cloudflare, Bunny, Hetzner, DigitalOcean, Porkbun, deSEC and DuckDNS (with other providers, add them by hand). The server's IP is detected automatically and the records are updated when it changes. Before saving, Stackmoor checks the API key and warns if the domain already points to another server.
 3. **Stack → Domain:** choose a subdomain, the service and its port inside the container.
+4. **Other servers (+ Proxy):** give a device or server outside Stackmoor – Proxmox, a router, a NAS – an address too: enter its IP and port (http or https, with an option to accept its own self-signed certificate). The dashboard shows whether it responds.
 
 Stackmoor runs Caddy in its own container (`stackmoor-caddy`) with one wildcard certificate for all apps. Caddy is updated together with the panel – each release ships its own Caddy image. The DNS provider can be changed any time in Settings. On Unraid, ports 80/443 are used by its web UI – choose other ports under *Advanced*.
 
@@ -97,6 +98,8 @@ What goes through the tunnel follows `AllowedIPs` in your file. **Kill switch is
 - [x] Updates: check for new Stackmoor versions and new stack images (on/off in Settings), show what is new and update only after confirmation
 - [x] Setup wizard: start with the IP address or set up the domain right away; the DNS record is added through the provider's API and the domain is checked first
 - [x] Connect through VPN (WireGuard) for chosen services – e.g. reach your servers from a fixed address; kill switch always on
+- [x] New look: top menu, dashboard, status bar, light and dark theme
+- [x] Proxy: addresses in your domain for other servers (Proxmox, routers, NAS), with a health check
 - [ ] Notifications (e-mail, Telegram, ntfy, Pushover, webhooks)
 - [ ] Unraid Community Apps template
 

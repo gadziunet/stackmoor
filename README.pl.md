@@ -65,6 +65,7 @@ Każdy stack może dostać adres typu `chmura.dom.example.com` z prawdziwym cert
 1. **Zaraz po instalacji** (albo później w zakładce **Domeny**): wpisz domenę, wybierz dostawcę DNS (Cloudflare, Bunny, OVHcloud, Hetzner, DigitalOcean, Porkbun, Namecheap, GoDaddy, IONOS, netcup, Gandi, AWS Route 53, deSEC, DuckDNS) i wklej klucz API. Klucze są zapisywane w formie zaszyfrowanej.
 2. Rekordy DNS `dom.example.com` i `*.dom.example.com` → lokalny adres IP serwera **dodają się same** dla Cloudflare, Bunny, Hetzner, DigitalOcean, Porkbun, deSEC i DuckDNS (u pozostałych dostawców dodaj je ręcznie). Adres IP serwera jest wykrywany automatycznie, a rekordy aktualizują się, gdy się zmieni. Przed zapisaniem Stackmoor sprawdza klucz API i ostrzega, jeśli domena wskazuje już na inny serwer.
 3. **Stack → Domena:** wybierz subdomenę, usługę i jej port w kontenerze.
+4. **Inne serwery (+ Proxy):** daj adres także urządzeniu albo serwerowi spoza Stackmoor – Proxmoxowi, routerowi, NAS-owi: wpisz jego IP i port (http albo https, z opcją akceptowania jego własnego certyfikatu). Pulpit pokazuje, czy odpowiada.
 
 Stackmoor uruchamia Caddy we własnym kontenerze (`stackmoor-caddy`) z jednym certyfikatem wildcard dla wszystkich aplikacji. Caddy aktualizuje się razem z panelem – każde wydanie ma własny obraz Caddy. Dostawcę DNS można zmienić w każdej chwili w Ustawieniach. Na Unraid porty 80/443 zajmuje jego panel – wybierz inne w sekcji *Zaawansowane*.
 
@@ -106,6 +107,8 @@ To, co idzie tunelem, wynika z `AllowedIPs` w Twoim pliku. **Blokada (kill switc
 - [x] Aktualizacje: sprawdzanie nowych wersji Stackmoor i nowych obrazów stacków (włączane w Ustawieniach), pokazanie co nowego i aktualizacja dopiero po potwierdzeniu
 - [x] Kreator: start po adresie IP albo od razu z domeną; rekord DNS dodaje się przez API dostawcy, a domena jest najpierw sprawdzana
 - [x] Łącz przez VPN (WireGuard) dla wybranych usług – np. łączenie z serwerami ze stałego adresu; blokada (kill switch) zawsze włączona
+- [x] Nowy wygląd: górne menu, pulpit, pasek stanu, jasny i ciemny motyw
+- [x] Proxy: adresy w Twojej domenie dla innych serwerów (Proxmox, routery, NAS) ze sprawdzaniem stanu
 - [ ] Powiadomienia (e-mail, Telegram, ntfy, Pushover, webhooki)
 - [ ] Szablon Unraid w Community Apps
 

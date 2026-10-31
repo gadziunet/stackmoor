@@ -14,6 +14,8 @@ const sqlTime = (s) => (s && !s.includes('T') ? `${s.replace(' ', 'T')}Z` : s);
  * @param {Array}  p.operations         latest stack operations (newest first)
  * @param {Array}  p.tunnels            vpn.list()
  * @param {object} p.domainStatus       domains.status() (may be cached)
+ * @param {Array}  p.proxies            proxies.list()
+ * @param {Array}  p.proxyEvents        proxy state changes (newest first)
  */
 export function buildOverview(p) {
   const addresses = {};
@@ -39,6 +41,7 @@ export function buildOverview(p) {
     ...(p.operations || []).slice(0, 8).map((o) => ({
       at: sqlTime(o.started_at), type: 'action', action: o.action, stack: o.stack, ok: o.status === 'ok', status: o.status,
     })),
+    ...(p.proxyEvents || []).slice(0, 8).map((e) => ({ at: e.at, type: 'proxy', name: e.name, ok: e.ok })),
   ].filter((e) => e.at).sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, 6);
 
   const ds = p.domainStatus || { enabled: false };
@@ -55,6 +58,10 @@ export function buildOverview(p) {
       perStack: lastBackup,
     },
     vpn: (p.tunnels || []).map((x) => ({ name: x.name, state: x.status?.state || 'unknown', stacks: (x.stacks || []).length })),
+    proxies: (p.proxies || []).map((x) => ({
+      id: x.id, name: x.name, address: p.domain ? `${x.subdomain}.${p.domain}` : null, target: x.target, monitor: x.monitor,
+      ok: x.status ? x.status.ok : null, ms: x.status?.ms ?? null, since: x.status?.since || null,
+    })),
     events,
   };
 }

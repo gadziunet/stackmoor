@@ -20,6 +20,7 @@ import { createPanelLock } from './panel-lock.js';
 import { createBackups } from './backups.js';
 import { createVpn } from './vpn.js';
 import { buildOverview } from './overview.js';
+import { createProxies, checkTarget, cleanProxy } from './proxies.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -57,6 +58,8 @@ domains.vpn.servicesFor = vpn.servicesFor;
 stacks.hooks.beforeUp = vpn.beforeUp;
 stacks.hooks.afterUp = vpn.afterUp;
 vpn.syncImages().catch(() => {}).finally(() => vpn.startMonitor());
+const proxies = createProxies({ db, getSettings: () => getSettings(db), reloadConfig: () => domains.reloadConfig() });
+proxies.startMonitor();
 
 // Changes with every start – the page uses it to notice that the panel restarted.
 const BOOT_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -285,7 +288,24 @@ app.get('/api/overview', wrap(async (_req, res) => {
     operations: stacks.recentOperations(8),
     tunnels: vpn.list(),
     domainStatus: await cachedDomainStatus(),
+    proxies: proxies.list(),
+    proxyEvents: proxies.events(),
   }));
+}));
+
+// ---------- proxies (servers outside Stackmoor) ----------
+
+app.get('/api/proxies', (_req, res) => res.json(proxies.list()));
+app.post('/api/proxies', wrap(async (req, res) => res.status(201).json(await proxies.save(req.body || {}))));
+app.put('/api/proxies/:id', wrap(async (req, res) => res.json(await proxies.save(req.body || {}, Number(req.params.id)))));
+app.delete('/api/proxies/:id', wrap(async (req, res) => {
+  await proxies.remove(Number(req.params.id));
+  res.json({ ok: true });
+}));
+// "Check connection" in the form: only the target is needed.
+app.post('/api/proxies/check', wrap(async (req, res) => {
+  const p = cleanProxy({ name: 'x', subdomain: 'x', ...(req.body || {}) });
+  res.json(await checkTarget(p));
 }));
 
 // ---------- updates ----------

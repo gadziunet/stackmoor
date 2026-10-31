@@ -489,6 +489,8 @@ function route() {
   if (st) return { page: 'settings', tab: st[1] || 'panel', nav: 'settings' };
   const m = h.match(/^stack\/([a-z0-9_-]+)$/);
   if (m) return { page: 'stack', name: m[1], nav: 'home' };
+  const px = h.match(/^proxy\/(new|\d+)$/);
+  if (px) return { page: 'proxy', id: px[1] === 'new' ? null : Number(px[1]), nav: 'home' };
   return { page: 'home', nav: 'home' };
 }
 
@@ -522,6 +524,7 @@ function renderShell() {
               <input type="search" id="stack-search" placeholder="${esc(t('nav.searchPh'))}" autocomplete="off" autocapitalize="off" spellcheck="false">
             </div>
             <a class="btn primary new-btn" href="#/new" aria-label="${esc(t('new.title'))}"><span class="lbl-long">${t('nav.newStack')}</span><span class="lbl-short">+</span></a>
+            <a class="btn proxy-btn hide-mobile" href="#/proxy/new">${t('px.newBtn')}</a>
             <div class="acct" id="acct">
               <button type="button" id="acct-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="acct-menu" aria-label="${esc(t('acct.title'))}">
                 ${svg(ICON.user)}<span class="acct-label">${t('acct.title')}</span><span class="caret" aria-hidden="true">▾</span>
@@ -710,6 +713,11 @@ function renderStatusbar() {
     const cls = ok ? 'ok' : v.state === 'down' ? 'bad' : '';
     parts.push(`<a href="#/network"${i ? ' class="hide-mobile"' : ''}><span class="${cls}">${v.state === 'down' ? '✕' : '●'}</span> <span class="lbl-long">${t('bar.vpn', { name: esc(v.name), state: t(`vpn.state.${v.state}`) })}</span><span class="lbl-short">VPN</span></a>`);
   });
+  const watched = (o?.proxies || []).filter((x) => x.monitor && x.ok !== null);
+  if (watched.length) {
+    const okN = watched.filter((x) => x.ok).length;
+    parts.push(`<a href="#/"><span class="${okN === watched.length ? 'ok' : 'bad'}">●</span> ${t('bar.proxies', { n: okN, total: watched.length })}</a>`);
+  }
   if (o?.backup?.configured) {
     const b = o.backup;
     const txt = b.running ? t('bar.backupRunning')
@@ -763,6 +771,7 @@ async function quickAction(name, act, btn) {
 }
 
 function eventText(e) {
+  if (e.type === 'proxy') return t(e.ok ? 'px.evUp' : 'px.evDown', { name: esc(e.name) });
   if (e.type === 'backup') {
     const kind = t(`bak.kind.${e.kind}`);
     if (e.stack) return `${kind} – ${esc(e.stack)}`;
@@ -786,13 +795,14 @@ function renderHome() {
   if (!state.stacks.length) {
     main.innerHTML = `<div class="card strong"><h2>${t('home.emptyTitle')}</h2>
       <p class="hint">${t('home.emptyLead')}</p>
-      <p><a class="btn primary" href="#/new">${t('home.emptyCta')}</a></p></div>`;
+      <p><a class="btn primary" href="#/new">${t('home.emptyCta')}</a></p></div>${proxySection(o)}`;
     return;
   }
   // Keep focus and scroll while the cards refresh every few seconds.
   const scroll = window.scrollY;
   main.innerHTML = `
-    <div class="dash-head"><h1>${t('home.title')}</h1><p class="hint">${summary.join(' · ')}</p></div>
+    <div class="dash-head"><h1>${t('home.title')}</h1><p class="hint">${summary.join(' · ')}</p>
+      ${o.domain?.enabled ? `<a class="dash-px-link" href="#/proxy/new">${t('px.newBtn')}</a>` : ''}</div>
     ${items.length ? `<div class="stack-cards">${items.map((s) => {
       const b = per[s.name];
       const act = s.updateAvailable ? 'update' : s.state === 'running' || s.state === 'partial' ? 'restart' : 'up';
@@ -813,6 +823,7 @@ function renderHome() {
         </div>
       </article>`;
     }).join('')}</div>` : `<p class="hint">${t('nav.noMatch')}</p>`}
+    ${proxySection(o)}
     ${o.events?.length ? `
       <section><h2>${t('dash.events')}</h2>
         <div class="events">${o.events.map((e) => `
@@ -830,6 +841,174 @@ function renderHome() {
     }
     quickAction(name, b.dataset.quick, b);
   }));
+}
+
+// ---------- proxies (servers outside Stackmoor) ----------
+
+const filteredProxies = (o) => {
+  const q = state.search || '';
+  const list = o?.proxies || [];
+  return q ? list.filter((x) => x.name.toLowerCase().includes(q) || (x.address || '').includes(q)) : list;
+};
+
+function proxySection(o) {
+  const list = filteredProxies(o);
+  if (!list.length) return '';
+  const watched = (o.proxies || []).filter((x) => x.monitor && x.ok !== null);
+  const okCount = watched.filter((x) => x.ok).length;
+  return `
+    <section class="px-section" aria-labelledby="px-h">
+      <div class="dash-head"><h1 id="px-h">${t('px.title')}</h1>
+        <p class="hint">${t('px.lead')}${watched.length ? ` · ${t('px.okOf', { n: okCount, total: watched.length })}` : ''}</p>
+        <a class="dash-more" href="#/proxy/new">+ ${t('px.add')}</a></div>
+      <div class="stack-cards">${list.map((x) => {
+        const st = x.monitor === false || x.ok === null ? '' : x.ok ? 'running' : 'exited';
+        const stateText = x.monitor === false ? t('px.notWatched')
+          : x.ok === null ? t('px.checking')
+            : x.ok ? t('px.up', { ms: x.ms ?? '—' }) : t('px.down', { ago: x.since ? ago(x.since).replace(/^\s+/, '') : '' });
+        return `
+        <article class="stack-card proxy-card ${x.ok === false ? 'down' : ''}">
+          <div class="top"><span class="dot ${st}"></span><h3><a href="#/proxy/${x.id}">${esc(x.name)}</a></h3><span class="tag proxy">${t('px.tag')}</span></div>
+          <dl>
+            <dt>${t('px.target')}</dt><dd><code>${esc(x.target)}</code></dd>
+            <dt>${t('dash.address')}</dt><dd>${x.address ? esc(x.address) : '—'}</dd>
+            <dt>${t('px.state')}</dt><dd class="${st === 'running' ? 'ok-text' : st === 'exited' ? 'bad-text' : ''}">${stateText}</dd>
+          </dl>
+          <div class="acts">
+            <a class="btn" href="#/proxy/${x.id}">${t('px.edit')}</a>
+            ${x.address ? `<a class="btn" href="https://${esc(x.address)}" target="_blank" rel="noopener">${t('dash.open')} ↗</a>` : ''}
+          </div>
+        </article>`;
+      }).join('')}</div>
+    </section>`;
+}
+
+async function renderProxyForm(id) {
+  const main = frame('page');
+  main.innerHTML = `<p class="hint">${t('stack.loading')}</p>`;
+  let d;
+  let list;
+  try {
+    [d, list] = await Promise.all([api('GET', '/api/domains'), api('GET', '/api/proxies')]);
+  } catch (err) {
+    main.innerHTML = errorBox(err);
+    return;
+  }
+  if (route().page !== 'proxy') return;
+  const cur = id ? list.find((x) => x.id === id) : null;
+  if (id && !cur) { main.innerHTML = `<div class="notice error">${t('px.notFound')}</div>`; return; }
+  const p = cur || { name: '', subdomain: '', scheme: 'https', host: '', port: '', insecure: true, hostHeader: false, monitor: true };
+  main.innerHTML = `
+    <a class="back-link" href="#/">← ${t('px.back')}</a>
+    <div class="head"><div class="ht"><h1>${cur ? esc(cur.name) : t('px.newTitle')}</h1><p class="lead">${t('px.formLead')}</p></div></div>
+    ${!d.domain ? `<div class="card"><p class="hint" style="margin-top:0">${t('px.needDomain')}</p><a class="btn" href="#/domains">${t('route.goSettings')}</a></div>` : `
+    <div class="two-col">
+      <form class="card strong wide" id="px-form" novalidate>
+        <div class="row field" style="align-items:flex-start">
+          <div style="flex:1;min-width:200px"><label for="px-name">${t('px.name')}</label>
+            <input type="text" id="px-name" value="${esc(p.name)}" maxlength="40" placeholder="proxmox" autocomplete="off"></div>
+          <div style="flex:1;min-width:220px"><label for="px-sub">${t('dash.address')}</label>
+            <div class="row" style="flex-wrap:nowrap;gap:6px"><input type="text" id="px-sub" value="${esc(p.subdomain)}" placeholder="proxmox" autocapitalize="off" autocomplete="off" style="flex:1;min-width:0">
+              <span class="hint" style="margin:0;white-space:nowrap">.${esc(d.domain)}</span></div></div>
+        </div>
+        <div class="field"><label for="px-host">${t('px.targetLabel')}</label>
+          <div class="px-target">
+            <select id="px-scheme" class="lang" aria-label="${esc(t('px.scheme'))}">
+              <option value="https" ${p.scheme === 'https' ? 'selected' : ''}>https://</option>
+              <option value="http" ${p.scheme === 'http' ? 'selected' : ''}>http://</option>
+            </select>
+            <input type="text" id="px-host" value="${esc(p.host)}" placeholder="192.168.1.10" autocapitalize="off" autocomplete="off" spellcheck="false">
+            <input type="number" id="px-port" value="${esc(p.port)}" placeholder="${esc(t('route.port'))}" min="1" max="65535" aria-label="${esc(t('route.port'))}">
+          </div>
+          <p class="hint">${t('px.targetHint')}</p></div>
+        <label class="check field" id="px-insecure-row"><input type="checkbox" id="px-insecure" ${p.insecure ? 'checked' : ''}>
+          <span>${t('px.insecure')} <span class="hint">${t('px.insecureHint')}</span></span></label>
+        <details class="field" ${p.hostHeader || !p.monitor ? 'open' : ''}><summary>${t('px.advanced')}</summary>
+          <label class="check" style="margin-top:10px"><input type="checkbox" id="px-hosthdr" ${p.hostHeader ? 'checked' : ''}>
+            <span>${t('px.hostHeader')} <span class="hint">${t('px.hostHeaderHint')}</span></span></label>
+          <label class="check" style="margin-top:8px"><input type="checkbox" id="px-monitor" ${p.monitor ? 'checked' : ''}>
+            <span>${t('px.monitor')}</span></label>
+        </details>
+        <div class="px-check field">
+          <button type="button" class="btn small" id="px-check" style="border-color:var(--text);font-weight:600">${t('px.check')}</button>
+          <span id="px-check-out" class="hint" style="margin:0"></span>
+        </div>
+        <div id="px-out"></div>
+        <div class="row">
+          <button class="btn primary" type="submit">${cur ? t('edit.save') : t('px.saveNew')}</button>
+          <a class="btn" href="#/">${t('bak.cancel')}</a>
+          ${cur ? `<button type="button" class="btn danger" id="px-del" style="margin-left:auto">${t('px.remove')}</button>` : ''}
+        </div>
+      </form>
+      <aside class="card">
+        <h2>${t('px.afterTitle')}</h2>
+        <ol class="px-after">
+          <li>${t('px.after1', { domain: esc(d.domain) })}</li>
+          <li>${t('px.after2')}</li>
+          <li>${t('px.after3')}</li>
+        </ol>
+        <p class="hint">${t('px.afterNote')}</p>
+      </aside>
+    </div>`}`;
+  if (!d.domain) return;
+  const val = (x) => document.getElementById(x).value;
+  const body = () => ({
+    name: val('px-name'), subdomain: val('px-sub'), scheme: val('px-scheme'), host: val('px-host'), port: Number(val('px-port')),
+    insecure: document.getElementById('px-insecure').checked,
+    hostHeader: document.getElementById('px-hosthdr').checked,
+    monitor: document.getElementById('px-monitor').checked,
+  });
+  const syncScheme = () => { document.getElementById('px-insecure-row').hidden = val('px-scheme') !== 'https'; };
+  document.getElementById('px-scheme').addEventListener('change', syncScheme);
+  syncScheme();
+  // The address follows the name until it is typed by hand.
+  const sub = document.getElementById('px-sub');
+  let subTouched = Boolean(p.subdomain);
+  sub.addEventListener('input', () => { subTouched = true; });
+  document.getElementById('px-name').addEventListener('input', (e) => {
+    if (!subTouched) sub.value = e.target.value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 63);
+  });
+  document.getElementById('px-check').addEventListener('click', async (e) => {
+    const out = document.getElementById('px-check-out');
+    e.target.disabled = true;
+    out.className = 'hint';
+    out.textContent = t('px.checking');
+    try {
+      const r = await api('POST', '/api/proxies/check', body());
+      out.className = r.ok ? 'ok-text' : 'bad-text';
+      out.textContent = r.ok
+        ? `✓ ${t('px.checkOk', { ms: r.ms })}${r.tls ? ` · ${t(`px.tls.${r.tls}`)}` : ''}`
+        : `✕ ${t('px.checkFail', { error: r.error })}`;
+    } catch (err) {
+      out.className = 'bad-text';
+      out.textContent = err.message;
+    }
+    e.target.disabled = false;
+  });
+  document.getElementById('px-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const out = document.getElementById('px-out');
+    try {
+      if (cur) await api('PUT', `/api/proxies/${cur.id}`, body());
+      else await api('POST', '/api/proxies', body());
+      toast(t('toast.saved'));
+      await refreshOverview();
+      location.hash = '#/';
+    } catch (err) {
+      out.innerHTML = errorBox(err);
+    }
+  });
+  document.getElementById('px-del')?.addEventListener('click', async () => {
+    if (!confirm(t('px.removeConfirm', { name: cur.name }))) return;
+    try {
+      await api('DELETE', `/api/proxies/${cur.id}`);
+      toast(t('toast.done'));
+      await refreshOverview();
+      location.hash = '#/';
+    } catch (err) {
+      document.getElementById('px-out').innerHTML = errorBox(err);
+    }
+  });
 }
 
 const fmtShort = (iso) => new Date(iso).toLocaleString(lang === 'pl' ? 'pl-PL' : 'en-GB', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -1911,6 +2090,8 @@ async function settingsDomains(body) {
   if (route().page !== 'domains') return;
   const st = d.status || {};
   const routes = d.routes || [];
+  const pxs = d.domain ? await api('GET', '/api/proxies').catch(() => []) : [];
+  if (route().page !== 'domains') return;
   body.innerHTML = `
     <div class="two-col" style="margin-bottom:24px">
       <div class="card wide">
@@ -1921,14 +2102,16 @@ async function settingsDomains(body) {
       ${st.enabled ? '<div class="card strong" id="dom-status"></div>' : ''}
     </div>
     ${d.domain ? `<section><h2>${t('dom.routesTitle')}</h2>
-      ${routes.length ? `<div class="card" style="padding:0;overflow-x:auto"><table>
+      ${routes.length || pxs.length ? `<div class="card" style="padding:0;overflow-x:auto"><table>
         <thead><tr><th>${t('dom.routeAddr')}</th><th>${t('dom.routeTarget')}</th><th></th></tr></thead>
         <tbody>${routes.map((r) => {
           const vpnOn = state.stacks.find((x) => x.name === r.stack)?.vpn;
           return `<tr><td><a href="https://${esc(r.subdomain)}.${esc(d.domain)}" target="_blank" rel="noopener">${esc(r.subdomain)}.${esc(d.domain)}</a></td>
             <td><code><a href="#/stack/${esc(r.stack)}">${esc(r.stack)}</a> → ${esc(r.service)}:${esc(r.port)}</code></td>
             <td>${vpnOn ? `<span class="tag">${t('dom.viaVpn', { name: esc(vpnOn.tunnel) })}</span>` : ''}</td></tr>`;
-        }).join('')}</tbody></table></div>` : `<p class="hint">${t('dom.routesNone')}</p>`}
+        }).join('')}${pxs.map((x) => `<tr><td><a href="https://${esc(x.subdomain)}.${esc(d.domain)}" target="_blank" rel="noopener">${esc(x.subdomain)}.${esc(d.domain)}</a></td>
+            <td><code><a href="#/proxy/${x.id}">${esc(x.name)}</a> → ${esc(x.target)}</code></td>
+            <td><span class="tag proxy">${t('px.tag')}</span></td></tr>`).join('')}</tbody></table></div>` : `<p class="hint">${t('dom.routesNone')}</p>`}
       <p class="hint">${t('dom.routesHint')}</p></section>` : ''}`;
   domainForm(document.getElementById('dom-form-box'), d, {
     onApplied: () => setTimeout(() => { if (route().page === 'domains') settingsDomains(body); }, 8000),
@@ -2660,6 +2843,7 @@ function render() {
   const r = route();
   if (r.page === 'new') renderNew();
   else if (r.page === 'stack') renderStack(r.name);
+  else if (r.page === 'proxy') renderProxyForm(r.id);
   else if (r.page === 'settings') renderSettings(r.tab);
   else if (r.page === 'network') renderNetwork(r.tab);
   else if (r.page === 'backups' || r.page === 'domains' || r.page === 'account') renderPage(r.page);

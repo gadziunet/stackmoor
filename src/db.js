@@ -51,6 +51,20 @@ const MIGRATIONS = [
   );
   CREATE INDEX routes_stack ON routes(stack);
   `,
+  `
+  CREATE TABLE proxies (
+    id          INTEGER PRIMARY KEY,
+    name        TEXT NOT NULL,
+    subdomain   TEXT NOT NULL UNIQUE,
+    scheme      TEXT NOT NULL DEFAULT 'http',
+    host        TEXT NOT NULL,
+    port        INTEGER NOT NULL,
+    insecure    INTEGER NOT NULL DEFAULT 0,
+    host_header INTEGER NOT NULL DEFAULT 0,
+    monitor     INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  `,
 ];
 
 export const DEFAULT_SETTINGS = {
