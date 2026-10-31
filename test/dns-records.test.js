@@ -69,15 +69,15 @@ test('Cloudflare: a rejected token is reported as auth', async () => {
 
 test('Bunny: relative record name in the zone', async () => {
   const f = fakeFetch({
-    'GET /dnszone': () => [200, { Items: [{ Id: 7, Domain: 'svr10.eu', Records: [{ Id: 1, Type: 0, Name: 'www', Value: '1.1.1.1' }] }] }],
+    'GET /dnszone': () => [200, { Items: [{ Id: 7, Domain: 'example.com', Records: [{ Id: 1, Type: 0, Name: 'www', Value: '1.1.1.1' }] }] }],
     'PUT /dnszone/7/records': () => [201, {}],
   });
-  const r = await upsertRecord({ domain: 'dom.svr10.eu', provider: 'bunny', credentials: { access_key: 'K' }, ip: '192.168.40.2', fetchFn: f });
+  const r = await upsertRecord({ domain: 'dom.example.com', provider: 'bunny', credentials: { access_key: 'K' }, ip: '192.168.1.2', fetchFn: f });
   assert.equal(r.action, 'created');
   const puts = f.calls.filter((c) => c.key.startsWith('PUT'));
   assert.deepEqual(puts.map((p) => p.body), [
-    { Type: 0, Name: '*.dom', Value: '192.168.40.2', Ttl: 300 },
-    { Type: 0, Name: 'dom', Value: '192.168.40.2', Ttl: 300 },
+    { Type: 0, Name: '*.dom', Value: '192.168.1.2', Ttl: 300 },
+    { Type: 0, Name: 'dom', Value: '192.168.1.2', Ttl: 300 },
   ]);
   assert.equal(f.calls[0].headers.AccessKey, 'K');
 });

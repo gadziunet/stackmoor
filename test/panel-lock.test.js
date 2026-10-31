@@ -24,16 +24,16 @@ const make = (s = settings, caddyIp = '172.20.0.2', env = {}) => createPanelLock
 test('panel lock: Caddy passes, IP access is redirected', () => {
   const lock = make();
   assert.ok(run(lock, { socket: { remoteAddress: '::ffff:172.20.0.2' } }).next);
-  const r = run(lock, { socket: { remoteAddress: '192.168.40.10' }, originalUrl: '/#/settings', hostname: '192.168.40.240' });
+  const r = run(lock, { socket: { remoteAddress: '192.168.1.10' }, originalUrl: '/#/settings', hostname: '192.168.1.240' });
   assert.equal(r.status, 302);
   assert.equal(r.location, 'https://panel.dom.example.com/#/settings');
   // A spoofed Host header does not help when Caddy's address is known.
-  assert.equal(run(lock, { socket: { remoteAddress: '192.168.40.10' }, hostname: 'panel.dom.example.com' }).status, 302);
+  assert.equal(run(lock, { socket: { remoteAddress: '192.168.1.10' }, hostname: 'panel.dom.example.com' }).status, 302);
 });
 
 test('panel lock: API answers 421 with the address, health check stays open', () => {
   const lock = make();
-  const api = run(lock, { socket: { remoteAddress: '192.168.40.10' }, path: '/api/stacks', method: 'GET' });
+  const api = run(lock, { socket: { remoteAddress: '192.168.1.10' }, path: '/api/stacks', method: 'GET' });
   assert.equal(api.status, 421);
   assert.equal(api.json.redirect, 'https://panel.dom.example.com');
   assert.ok(run(lock, { socket: { remoteAddress: '172.17.0.1' }, path: '/api/state' }).next);
@@ -41,11 +41,11 @@ test('panel lock: API answers 421 with the address, health check stays open', ()
 });
 
 test('panel lock: off, incomplete settings or emergency switch let everything through', () => {
-  const ip = { socket: { remoteAddress: '192.168.40.10' } };
+  const ip = { socket: { remoteAddress: '192.168.1.10' } };
   assert.ok(run(make({ ...settings, panelDomainOnly: false }), ip).next);
   assert.ok(run(make({ ...settings, panelSubdomain: '' }), ip).next);
   assert.ok(run(make(settings, '172.20.0.2', { STACKMOOR_ALLOW_IP: '1' }), ip).next);
   // Unknown Caddy address: fall back to the Host header.
   assert.ok(run(make(settings, null), { ...ip, hostname: 'panel.dom.example.com' }).next);
-  assert.equal(run(make(settings, null), { ...ip, hostname: '192.168.40.240' }).status, 302);
+  assert.equal(run(make(settings, null), { ...ip, hostname: '192.168.1.240' }).status, 302);
 });
