@@ -73,6 +73,8 @@ app.use(i18nMiddleware);
 domains.attachSelf().catch(() => {})
   .then(() => domains.syncServerIp((key, vars) => translate(lastLang, key, vars))).catch(() => {})
   .then(() => domains.syncImage()).catch(() => {})
+  // A new panel version may build Caddy's config differently (e.g. proxy redirects): rewrite it.
+  .then(() => (getSettings(db).domain ? domains.reloadConfig() : null)).catch(() => {})
   .then(() => domains.refreshCaddyIp()).catch(() => {});
 // Caddy follows the panel version; retry now and then in case its image was published later.
 setInterval(() => { domains.syncImage().catch(() => {}); }, 6 * 3600_000).unref();

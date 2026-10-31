@@ -35,9 +35,27 @@ export function cleanProxy(body = {}) {
 const hostPort = (p) => (p.host.includes(':') ? `[${p.host}]:${p.port}` : `${p.host}:${p.port}`);
 export const targetUrl = (p) => `${p.scheme}://${hostPort(p)}`;
 
+const reEscape = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Some panels (Unraid, routers…) redirect to their own full address, e.g.
+ * http://192.168.1.10:8086/Dashboard. Like Nginx Proxy Manager, turn that back into
+ * our address – relative redirects and other addresses are left alone.
+ */
+export function locationRewrite(p) {
+  const host = p.host.includes(':') ? `\\[${reEscape(p.host)}\\]` : reEscape(p.host);
+  // The default port may be left out of the address.
+  const port = p.port === 80 || p.port === 443 ? `(?::${p.port})?` : `:${p.port}`;
+  return { search_regexp: `(?i)^https?://${host}${port}(/|$)`, replace: 'https://{http.request.host}$1' };
+}
+
 /** The Caddy route for one proxy. */
 export function proxyRoute(p, domain) {
-  const handler = { handler: 'reverse_proxy', upstreams: [{ dial: hostPort(p) }] };
+  const handler = {
+    handler: 'reverse_proxy',
+    upstreams: [{ dial: hostPort(p) }],
+    headers: { response: { replace: { Location: [locationRewrite(p)] } } },
+  };
   if (p.scheme === 'https') {
     handler.transport = {
       protocol: 'http',
@@ -49,7 +67,7 @@ export function proxyRoute(p, domain) {
     };
   }
   // Some servers only answer to their own name or address.
-  if (p.hostHeader) handler.headers = { request: { set: { Host: ['{http.reverse_proxy.upstream.hostport}'] } } };
+  if (p.hostHeader) handler.headers.request = { set: { Host: ['{http.reverse_proxy.upstream.hostport}'] } };
   return { match: [{ host: [`${p.subdomain}.${domain}`] }], handle: [handler], terminal: true };
 }
 

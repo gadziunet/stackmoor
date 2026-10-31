@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import net from 'node:net';
 import { openDb, saveSettings, getSettings } from '../src/db.js';
-import { cleanProxy, proxyRoute, targetUrl, checkTarget, createProxies } from '../src/proxies.js';
+import { cleanProxy, proxyRoute, targetUrl, checkTarget, createProxies, locationRewrite } from '../src/proxies.js';
 
 test('form values are checked and cleaned', () => {
   const p = cleanProxy({ name: ' Proxmox ', subdomain: 'PVE', scheme: 'https', host: 'https://192.168.40.10/', port: '8006' });
@@ -26,6 +26,27 @@ test('Caddy route: https with a self-signed certificate, host name and Host head
   assert.deepEqual(n.handle[0].headers.request.set.Host, ['{http.reverse_proxy.upstream.hostport}']);
   const plain = proxyRoute({ subdomain: 'ha', scheme: 'http', host: '10.0.0.2', port: 8123 }, 'd.eu');
   assert.equal(plain.handle[0].transport, undefined);
+});
+
+test('redirects to the target\'s own address come back to our address (like NPM)', () => {
+  // Caddy uses Go regexps: (?i) at the start is the case-insensitive flag.
+  const rewrite = (p, loc) => {
+    const r = locationRewrite(p);
+    const re = new RegExp(r.search_regexp.replace('(?i)', ''), 'i');
+    return loc.replace(re, r.replace.replace('{http.request.host}', 'un.d.eu').replace('$1', '$1'));
+  };
+  const unraid = { host: '192.168.40.111', port: 8086 };
+  assert.equal(rewrite(unraid, 'http://192.168.40.111:8086/Dashboard'), 'https://un.d.eu/Dashboard');
+  assert.equal(rewrite(unraid, 'HTTP://192.168.40.111:8086'), 'https://un.d.eu');
+  assert.equal(rewrite(unraid, '/Dashboard'), '/Dashboard'); // relative (QNAP) – untouched
+  assert.equal(rewrite(unraid, 'http://192.168.40.111:80/x'), 'http://192.168.40.111:80/x'); // another port
+  assert.equal(rewrite(unraid, 'http://192.168.40.1110:8086/x'), 'http://192.168.40.1110:8086/x'); // another address
+  const nas = { host: 'nas.lan', port: 443 };
+  assert.equal(rewrite(nas, 'https://nas.lan/login'), 'https://un.d.eu/login'); // default port left out
+  assert.equal(rewrite(nas, 'https://nas.lan:443/login'), 'https://un.d.eu/login');
+  const r = proxyRoute({ subdomain: 'un', scheme: 'http', host: '192.168.40.111', port: 8086, hostHeader: true }, 'd.eu');
+  assert.ok(r.handle[0].headers.response.replace.Location);
+  assert.ok(r.handle[0].headers.request.set.Host);
 });
 
 test('connection check: open and closed ports', async () => {
