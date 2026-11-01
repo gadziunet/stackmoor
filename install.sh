@@ -11,6 +11,8 @@
 #   STACKS_DIR       where stacks are stored            (default: /opt/stacks)
 #   INSTALL_DIR      where the panel's files live       (default: /opt/stackmoor)
 #   STACKMOOR_IMAGE image to run                       (default: ghcr.io/gadziunet/stackmoor:latest)
+#   AUTO_PATCHES     yes/no – automatic security updates of the system (Debian/Ubuntu)
+#   AUTO_REBOOT      HH:MM to restart when a patch needs it, or "no"  (default: 04:00)
 
 set -euo pipefail
 
@@ -111,6 +113,60 @@ fi
 info "$(docker compose version)"
 
 docker info >/dev/null 2>&1 || die "Docker is installed but not running. Start it (systemctl start docker) and try again."
+
+# ---------- system patches (Debian/Ubuntu) ----------
+
+# Answers come from the terminal even when the script is piped into bash (curl … | sudo bash).
+ask() {
+  local prompt="$1" default="$2" reply=""
+  if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+    printf '  %s ' "$prompt" > /dev/tty
+    read -r reply < /dev/tty || reply=""
+  fi
+  printf '%s' "${reply:-$default}"
+}
+
+UU_CONF=/etc/apt/apt.conf.d/20auto-upgrades
+REBOOT_CONF=/etc/apt/apt.conf.d/52stackmoor-reboot
+if command -v apt-get >/dev/null 2>&1; then
+  step "System patches"
+  if grep -qs 'Unattended-Upgrade "1"' "$UU_CONF" && dpkg-query -W -f='${Status}' unattended-upgrades 2>/dev/null | grep -q "install ok installed"; then
+    info "Automatic security updates are on"
+    [ -f "$REBOOT_CONF" ] && info "Restart after patches: $(sed -n 's/.*Automatic-Reboot-Time "\(.*\)".*/\1/p' "$REBOOT_CONF") (change it in the panel: Settings → Server)"
+  else
+    PATCHES="${AUTO_PATCHES:-}"
+    if [ -z "$PATCHES" ]; then
+      if [ -r /dev/tty ]; then
+        PATCHES="$(ask 'Install security updates of the system automatically every day? [Y/n]' y)"
+      else
+        PATCHES=no
+        warn "Automatic security updates are off. Turn them on in the panel: Settings → Server."
+      fi
+    fi
+    case "$PATCHES" in
+      [Yy]*)
+        info "Installing unattended-upgrades…"
+        DEBIAN_FRONTEND=noninteractive apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq unattended-upgrades >/dev/null
+        printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' > "$UU_CONF"
+        info "Automatic security updates are on"
+        REBOOT="${AUTO_REBOOT:-}"
+        if [ -z "$REBOOT" ]; then
+          REBOOT="$(ask 'Restart the server by itself when a patch needs it? Time (HH:MM) or "n" [04:00]:' 04:00)"
+        fi
+        case "$REBOOT" in
+          [Nn]*) info "No automatic restart – the panel shows when the system needs one" ;;
+          *)
+            [[ "$REBOOT" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || { warn "\"$REBOOT\" is not a time – using 04:00"; REBOOT=04:00; }
+            printf '// Written by Stackmoor – restart the server when a patch needs it.\nUnattended-Upgrade::Automatic-Reboot "true";\nUnattended-Upgrade::Automatic-Reboot-Time "%s";\n' "$REBOOT" > "$REBOOT_CONF"
+            info "The server restarts at $REBOOT when a patch needs it; your stacks start again by themselves"
+            ;;
+        esac
+        ;;
+      *) info "Skipped – you can turn it on later in the panel: Settings → Server" ;;
+    esac
+  fi
+fi
 
 # ---------- files ----------
 

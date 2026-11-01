@@ -30,6 +30,8 @@ Ponowne uruchomienie tego samego polecenia aktualizuje panel. Opcjonalnie: `curl
 - Uruchom, Restart, Aktualizuj (pull + up), Zatrzymaj, Wyłącz – z wyjściem na żywo
 - logi na żywo, kontenery z portami, historia operacji
 - usuwanie stacka przenosi folder do `.trash/` – nic nie znika przypadkiem
+- automatyczne aktualizacje stacków w wybrane dni (domyślnie wyłączone): najpierw kopia, powrót do poprzednich obrazów, gdy nowe się nie uruchomią
+- restart serwera z panelu albo według harmonogramu; stacki, które działały, uruchamiają się ponownie – także te bez `restart:`
 - interfejs po polsku i angielsku
 
 ## Automatyczne wolumeny
@@ -104,12 +106,14 @@ To, co idzie tunelem, wynika z `AllowedIPs` w Twoim pliku. **Blokada (kill switc
 - [x] Domeny lokalne przez Caddy – certyfikat wildcard przez API dostawcy DNS (14 dostawców) albo wewnętrzny CA
 - [x] Backupy jak w Cloudronie – per stack, automatycznie przed aktualizacją, dumpy baz, harmonogram, retencja, szyfrowanie; restic do S3 / Backblaze B2; przywracanie i klonowanie
 - [x] Kreator: nowa instalacja albo przywrócenie całego serwera z kopii
-- [x] Aktualizacje: sprawdzanie nowych wersji Stackmoor i nowych obrazów stacków (włączane w Ustawieniach), pokazanie co nowego i aktualizacja dopiero po potwierdzeniu
+- [x] Aktualizacje: sprawdzanie nowych wersji Stackmoor i nowych obrazów stacków (włączane w Ustawieniach), pokazanie co nowego; sam panel aktualizuje się dopiero po potwierdzeniu
 - [x] Kreator: start po adresie IP albo od razu z domeną; rekord DNS dodaje się przez API dostawcy, a domena jest najpierw sprawdzana
 - [x] Łącz przez VPN (WireGuard) dla wybranych usług – np. łączenie z serwerami ze stałego adresu; blokada (kill switch) zawsze włączona
 - [x] Nowy wygląd: górne menu, pulpit, pasek stanu, jasny i ciemny motyw
 - [x] Proxy: adresy w Twojej domenie dla innych serwerów (Proxmox, routery, NAS) ze sprawdzaniem stanu
+- [x] Automatyczne aktualizacje stacków (domyślnie wyłączone) z kopią przed aktualizacją i powrotem do poprzedniej wersji, gdy nowa się nie uruchomi; restart serwera z panelu i według harmonogramu; automatyczne łatki systemu (Debian/Ubuntu)
 - [ ] Powiadomienia (e-mail, Telegram, ntfy, Pushover, webhooki)
+- [ ] Pangolin – publiczne adresy obok lokalnej domeny
 - [ ] Szablon Unraid w Community Apps
 
 ## Rozwój

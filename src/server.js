@@ -21,6 +21,8 @@ import { createBackups } from './backups.js';
 import { createVpn } from './vpn.js';
 import { buildOverview } from './overview.js';
 import { createProxies, checkTarget, cleanProxy } from './proxies.js';
+import { createAutoUpdate } from './autoupdate.js';
+import { createSystem } from './system.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -60,6 +62,12 @@ stacks.hooks.afterUp = vpn.afterUp;
 vpn.syncImages().catch(() => {}).finally(() => vpn.startMonitor());
 const proxies = createProxies({ db, getSettings: () => getSettings(db), reloadConfig: () => domains.reloadConfig() });
 proxies.startMonitor();
+const getT = () => (key, vars) => translate(lastLang, key, vars);
+const settingsApi = { getSettings: () => getSettings(db), saveSettings: (patch) => saveSettings(db, patch) };
+const autoUpdate = createAutoUpdate({ db, stacks, updates, backups, ...settingsApi, getT, isRebooting: () => system.isRebooting() });
+autoUpdate.startScheduler();
+const system = createSystem({ db, stacks, updates, backups, autoUpdate, ...settingsApi, getT });
+system.startMonitor();
 
 // Changes with every start – the page uses it to notice that the panel restarted.
 const BOOT_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -371,6 +379,29 @@ app.delete('/api/vpn/:name', wrap(async (req, res) => {
   await vpn.remove(req.params.name);
   res.json({ ok: true });
 }));
+
+// ---------- automatic stack updates ----------
+
+app.get('/api/autoupdate', (_req, res) => res.json(autoUpdate.status()));
+app.put('/api/autoupdate', (req, res) => {
+  autoUpdate.saveConfig(req.body || {});
+  res.json(autoUpdate.status());
+});
+app.post('/api/autoupdate/run', (_req, res) => {
+  autoUpdate.runAll('manual').catch((err) => console.error('Automatic update failed:', err.message));
+  res.json(autoUpdate.status());
+});
+
+// ---------- the server ----------
+
+app.get('/api/system', wrap(async (req, res) => {
+  const info = await system.info({ fresh: req.query.fresh === '1' });
+  res.json({ ...info, error: info.error ? req.t(info.error) : null });
+}));
+app.post('/api/system/reboot', wrap(async (_req, res) => res.json(await system.reboot('manual'))));
+app.put('/api/system/schedule', (req, res) => res.json(system.saveSchedule(req.body || {})));
+app.put('/api/system/auto-reboot', wrap(async (req, res) => res.json(await system.setAutoReboot(req.body || {}))));
+app.post('/api/system/patches', streamJob((req, write) => system.setPatches(Boolean(req.body?.enabled), write, req.t)));
 
 app.get('/api/stacks/:name/vpn', wrap(async (req, res) => {
   stacks.assertName(req.params.name);

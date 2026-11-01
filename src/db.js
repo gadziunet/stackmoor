@@ -74,10 +74,14 @@ export const DEFAULT_SETTINGS = {
   // Host paths the panel does NOT move into the stack folder
   // (e.g. media libraries). They are not backed up.
   hostPathAllowlist: ['/mnt', '/media'],
-  // Update checks (nothing is ever updated without the user confirming).
+  // Update checks.
   updateCheck: true,
   updateInterval: 'daily', // 'daily' | 'weekly'
   updateCheckStacks: true,
+  // Automatic stack updates (off until the user turns them on) – see autoupdate.js.
+  autoUpdate: { enabled: false, days: [0, 1, 2, 3, 4, 5, 6], time: '04:00', timeZone: 'UTC', exclude: [] },
+  // Restarting the server on a schedule – see system.js.
+  rebootSchedule: { enabled: false, days: [0], time: '05:00', timeZone: 'UTC' },
   // Local domains through Caddy. Empty domain = feature off.
   domain: '',            // e.g. local.example.com -> apps get <name>.local.example.com
   dnsProvider: '',       // provider id from dns-providers.js, or 'internal' for a self-signed CA

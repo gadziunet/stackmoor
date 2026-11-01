@@ -268,6 +268,9 @@ td code { font-size: 12px; }
 .choices[hidden] { display: none; }
 .progress { height: 6px; background: var(--line); overflow: hidden; margin: 0 0 14px; }
 .progress span { display: block; height: 100%; width: 0; background: var(--text); transition: width .4s ease; }
+.progress.indeterminate span { width: 35%; animation: sm-slide 1.4s ease-in-out infinite; }
+@keyframes sm-slide { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+@media (prefers-reduced-motion: reduce) { .progress.indeterminate span { animation: none; width: 100%; opacity: .4; } }
 
 /* ---------- dashboard ---------- */
 .dash-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
@@ -467,3 +470,7 @@ details > summary { cursor: pointer; color: var(--muted); font-size: 14px; }
   .events time { width: auto; }
   #toast { bottom: 140px; }
 }
+
+/* Automatic updates: the stacks to update */
+.au-list { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 4px 0 6px; }
+.card h3 { margin: 0 0 10px; font-size: 14px; }

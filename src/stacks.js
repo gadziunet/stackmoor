@@ -281,19 +281,21 @@ export function createStacks({ db, stacksDir, getSettings }) {
 
   // ---------- actions ----------
 
-  async function action(name, act, write, { signal, t }) {
+  /** label: the name saved in the history (e.g. 'autoupdate'); intro: first lines of its log. */
+  async function action(name, act, write, { signal, t, label = act, intro = '', noPull = false }) {
     if (!ACTIONS.has(act)) throw new UserError('action.unknown');
     let file = requireStack(name);
     if (locks.has(name)) throw new UserError('stack.busy', {}, 409);
     locks.add(name);
 
-    const op = db.prepare(`INSERT INTO operations(stack, action, status) VALUES (?, ?, 'running')`).run(name, act);
+    const op = db.prepare(`INSERT INTO operations(stack, action, status) VALUES (?, ?, 'running')`).run(name, label);
     let output = '';
     const log = (s) => {
       output += s;
       if (output.length > 60_000) output = output.slice(-40_000);
       write(s);
     };
+    if (intro) log(intro);
     const step = async (args) => {
       log(`$ docker compose ${args.join(' ')}\n`);
       const r = await docker([...base(name, file), ...args], { onData: log, signal });
@@ -310,7 +312,8 @@ export function createStacks({ db, stacksDir, getSettings }) {
         case 'up':
           file = await prepare(name, log, t);
           if (hooks.beforeUp) await hooks.beforeUp(name, log, t);
-          await step(['up', '-d', '--remove-orphans']);
+          // noPull: going back to kept images must not download the new ones again (pull_policy: always).
+          await step(['up', '-d', '--remove-orphans', ...(noPull ? ['--pull', 'never'] : [])]);
           if (hooks.afterUp) await hooks.afterUp(name, log, t);
           break;
         case 'update':

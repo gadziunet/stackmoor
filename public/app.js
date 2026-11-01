@@ -1613,7 +1613,7 @@ function revealActiveTab(nav, smooth = false) {
   nav.scrollTo({ left: Math.max(0, left), behavior: smooth ? 'smooth' : 'auto' });
 }
 
-const SETTINGS_TABS = ['panel', 'updates', 'folders'];
+const SETTINGS_TABS = ['panel', 'updates', 'server', 'folders'];
 
 async function renderSettings(tab = 'panel') {
   if (!SETTINGS_TABS.includes(tab)) tab = 'panel';
@@ -1625,6 +1625,7 @@ async function renderSettings(tab = 'panel') {
   const body = document.getElementById('set-body');
   try {
     if (tab === 'panel') return await settingsPanel(body);
+    if (tab === 'server') return await settingsServer(body);
     const s = await api('GET', '/api/settings');
     if (route().tab !== tab) return;
     (tab === 'updates' ? settingsUpdates : settingsGeneral)(body, s);
@@ -1747,7 +1748,9 @@ function settingsUpdates(body, s) {
       <p class="hint">${t('upd.neverAuto')}</p>
       <div id="upd-form-out"></div>
       <button class="btn primary">${t('set.save')}</button>
-    </form>`;
+    </form>
+
+    <div id="au-box"></div>`;
 
   document.getElementById('upd-check').addEventListener('click', async (e) => {
     e.target.disabled = true;
@@ -1765,6 +1768,7 @@ function settingsUpdates(body, s) {
   });
 
   document.getElementById('upd-apply')?.addEventListener('click', openUpdateDialog);
+  autoUpdateCard(document.getElementById('au-box'));
 
   document.getElementById('upd-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1782,6 +1786,247 @@ function settingsUpdates(body, s) {
   });
 }
 
+// ---------- schedules (automatic updates, restarts) ----------
+
+const browserZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
+const scheduleFields = (prefix, c) => `
+  <div class="field"><label>${t('bak.days')}</label>
+    <div class="row days">${WEEK.map((x) => `<label class="check"><input type="checkbox" class="${prefix}-day" value="${x}" ${c.days.includes(x) ? 'checked' : ''}> ${esc(dayName(x))}</label>`).join('')}</div></div>
+  <div class="field" style="max-width:180px"><label for="${prefix}-time">${t('bak.time')}</label>
+    <input type="time" id="${prefix}-time" value="${esc(c.time)}"></div>
+  <p class="hint field">${t('bak.timeZone', { zone: esc(browserZone()) })}</p>`;
+const readSchedule = (prefix) => ({
+  days: [...document.querySelectorAll(`.${prefix}-day:checked`)].map((x) => Number(x.value)),
+  time: document.getElementById(`${prefix}-time`).value,
+  timeZone: browserZone(),
+});
+
+// ---------- automatic stack updates ----------
+
+let auTimer = null;
+async function autoUpdateCard(box) {
+  clearTimeout(auTimer);
+  let d;
+  try {
+    d = await api('GET', '/api/autoupdate');
+  } catch (err) {
+    box.innerHTML = `<div class="card">${errorBox(err)}</div>`;
+    return;
+  }
+  if (!box.isConnected) return;
+  const c = d.config;
+  const list = state.stacks || [];
+  const isOn = (s) => s.state === 'running' || s.state === 'partial';
+  const resultTag = (r) => `<span class="tag ${r.result === 'updated' ? 'solid' : 'bad'}">${t(`au.result.${r.result}`)}</span>`;
+  box.innerHTML = `
+    <form class="card" id="au-form">
+      <h2>${t('au.title')}</h2>
+      <p class="hint" style="margin-top:-4px">${t('au.lead')}</p>
+      <label class="check field"><input type="checkbox" id="au-on" ${c.enabled ? 'checked' : ''}> <span>${t('au.enabled')}</span></label>
+      ${scheduleFields('au', c)}
+      <div class="field"><label>${t('au.stacks')}</label>
+        ${list.length
+          ? `<div class="au-list">${list.map((s) => `<label class="check"><input type="checkbox" class="au-stack" value="${esc(s.name)}" ${c.exclude.includes(s.name) ? '' : 'checked'}> <span>${esc(s.name)}${isOn(s) ? '' : ` <span class="hint">${t('au.stopped')}</span>`}</span></label>`).join('')}</div>`
+          : `<p class="hint">${t('au.noStacks')}</p>`}
+        <p class="hint">${t('au.stacksHint')}</p></div>
+      <div class="notice">${t('au.how')}</div>
+      <div id="au-out"></div>
+      <div class="row">
+        <button class="btn primary">${t('set.save')}</button>
+        <button type="button" class="btn" id="au-run" ${d.running ? 'disabled' : ''}>${d.running
+          ? esc(t('au.running', { stack: d.running.stack || '…' }))
+          : t('au.runNow')}</button>
+      </div>
+    </form>
+    <div class="card" style="padding:6px 8px; overflow-x:auto">
+      <h2 style="margin:10px 12px 4px">${t('au.history')}</h2>
+      ${d.runs.length ? `<table>
+        <thead><tr><th>${t('au.when')}</th><th>${t('au.stack')}</th><th>${t('au.result')}</th></tr></thead>
+        <tbody>${d.runs.map((r) => `
+          <tr><td>${esc(fmtDate(r.at))}<br><span class="hint">${t(r.kind === 'scheduled' ? 'au.kind.scheduled' : 'au.kind.manual')}</span></td>
+            <td><a href="#/stack/${esc(r.stack)}">${esc(r.stack)}</a>${(r.images || []).length ? `<br><span class="hint">${r.images.map((i) => `<code>${esc(i)}</code>`).join(' ')}</span>` : ''}</td>
+            <td>${resultTag(r)}${r.reason ? `<br><span class="hint">${esc(r.reason)}</span>` : ''}</td></tr>`).join('')}</tbody>
+      </table>` : `<p class="hint" style="margin:4px 12px 12px">${t('au.historyNone')}</p>`}
+    </div>`;
+
+  document.getElementById('au-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await api('PUT', '/api/autoupdate', {
+        enabled: document.getElementById('au-on').checked,
+        ...readSchedule('au'),
+        exclude: [...document.querySelectorAll('.au-stack:not(:checked)')].map((x) => x.value),
+      });
+      document.getElementById('au-out').innerHTML = '';
+      toast(t('set.saved'));
+    } catch (err) {
+      document.getElementById('au-out').innerHTML = errorBox(err);
+    }
+  });
+  document.getElementById('au-run').addEventListener('click', async (e) => {
+    if (!confirm(t('au.runConfirm'))) return;
+    e.target.disabled = true;
+    try {
+      await api('POST', '/api/autoupdate/run');
+      autoUpdateCard(box);
+    } catch (err) {
+      document.getElementById('au-out').innerHTML = errorBox(err);
+      e.target.disabled = false;
+    }
+  });
+  // While a run is going on, refresh the card until it ends.
+  if (d.running) auTimer = setTimeout(() => { if (box.isConnected) autoUpdateCard(box); }, 5000);
+}
+
+// ---------- the server ----------
+
+function fmtUptime(sec) {
+  if (sec == null) return '—';
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  return d ? t('sys.uptimeDays', { d, h }) : t('sys.uptimeHours', { h, m });
+}
+
+async function settingsServer(body, fresh = false) {
+  let d;
+  try {
+    d = await api('GET', `/api/system${fresh ? '?fresh=1' : ''}`);
+  } catch (err) {
+    body.innerHTML = errorBox(err);
+    return;
+  }
+  if (route().tab !== 'server') return;
+  const h = d.host;
+  const p = h?.patches;
+  const last = d.reboots?.[0];
+
+  let patches = '';
+  if (h && h.apt) {
+    patches = `
+      <div class="card">
+        <h2>${t('sys.patchesTitle')}</h2>
+        <p class="hint" style="margin-top:-4px">${t('sys.patchesLead')}</p>
+        <div class="kv">
+          <span>${t('sys.patchesState')}</span>
+          <strong>${p.enabled ? t('sys.patchesOn') : p.installed ? t('sys.patchesOff') : t('sys.patchesMissing')}</strong>
+        </div>
+        <button type="button" class="btn ${p.enabled ? '' : 'primary'}" id="sys-patches" data-on="${p.enabled ? '0' : '1'}">${p.enabled ? t('sys.patchesDisable') : t('sys.patchesEnable')}</button>
+        <div id="sys-patch-op" hidden><pre class="terminal" id="sys-patch-term"></pre></div>
+
+        <form id="sys-ar" style="margin-top:22px">
+          <h3>${t('sys.autoRebootTitle')}</h3>
+          <label class="check field"><input type="checkbox" id="sys-ar-on" ${p.autoReboot ? 'checked' : ''} ${p.enabled ? '' : 'disabled'}> <span>${t('sys.autoReboot')}</span></label>
+          <div class="field" style="max-width:180px"><label for="sys-ar-time">${t('sys.autoRebootTime')}</label>
+            <input type="time" id="sys-ar-time" value="${esc(p.rebootTime || '04:00')}" ${p.enabled ? '' : 'disabled'}></div>
+          <p class="hint field">${t('sys.autoRebootHint')}</p>
+          <div id="sys-ar-out"></div>
+          <button class="btn" ${p.enabled ? '' : 'disabled'}>${t('set.save')}</button>
+        </form>
+      </div>`;
+  } else if (h) {
+    patches = `<div class="card"><h2>${t('sys.patchesTitle')}</h2><p class="hint">${t(h.unraid ? 'sys.patchesUnraid' : 'sys.patchesOther')}</p></div>`;
+  }
+
+  body.innerHTML = `
+    <div class="card">
+      <h2>${t('sys.serverTitle')}</h2>
+      ${d.error ? `<div class="notice warn">${esc(d.error)}</div>` : ''}
+      ${h?.rebootRequired ? `<div class="notice warn"><strong>${t('sys.rebootRequired')}</strong>${h.packages.length ? `<div class="hint" style="margin-top:4px">${t('sys.rebootPackages', { list: esc(h.packages.join(', ')) })}</div>` : ''}</div>` : ''}
+      <div class="kv">
+        ${h ? `<span>${t('sys.os')}</span><strong>${esc(h.os || '—')}</strong>` : ''}
+        <span>${t('sys.uptime')}</span><span>${esc(fmtUptime(d.uptime))}</span>
+        <span>${t('sys.lastReboot')}</span><span>${last ? `${esc(fmtDate(last.at))} <span class="hint">${t(last.kind === 'scheduled' ? 'sys.kind.scheduled' : 'sys.kind.manual')}</span>` : '—'}</span>
+      </div>
+      <div class="row">
+        <button type="button" class="btn danger" id="sys-reboot" ${d.error ? 'disabled' : ''}>${t('sys.reboot')}</button>
+        <button type="button" class="btn" id="sys-refresh">${t('sys.refresh')}</button>
+      </div>
+      <div id="sys-out"></div>
+      <p class="hint" style="margin-top:12px">${t('sys.rebootHint')}</p>
+    </div>
+
+    <form class="card" id="sys-sched">
+      <h2>${t('sys.scheduleTitle')}</h2>
+      <p class="hint" style="margin-top:-4px">${t('sys.scheduleLead')}</p>
+      <label class="check field"><input type="checkbox" id="rb-on" ${d.schedule.enabled ? 'checked' : ''}> <span>${t('sys.scheduleOn')}</span></label>
+      ${scheduleFields('rb', d.schedule)}
+      <div id="rb-out"></div>
+      <button class="btn primary">${t('set.save')}</button>
+    </form>
+    ${patches}`;
+
+  document.getElementById('sys-refresh').addEventListener('click', () => settingsServer(body, true));
+  document.getElementById('sys-reboot').addEventListener('click', async (e) => {
+    if (!confirm(t('sys.rebootConfirm'))) return;
+    e.target.disabled = true;
+    try {
+      await api('POST', '/api/system/reboot');
+      showRebooting();
+    } catch (err) {
+      document.getElementById('sys-out').innerHTML = errorBox(err);
+      e.target.disabled = false;
+    }
+  });
+  document.getElementById('sys-sched').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await api('PUT', '/api/system/schedule', { enabled: document.getElementById('rb-on').checked, ...readSchedule('rb') });
+      document.getElementById('rb-out').innerHTML = '';
+      toast(t('set.saved'));
+    } catch (err) {
+      document.getElementById('rb-out').innerHTML = errorBox(err);
+    }
+  });
+  document.getElementById('sys-patches')?.addEventListener('click', async (e) => {
+    const on = e.target.dataset.on === '1';
+    if (!on && !confirm(t('sys.patchesDisableConfirm'))) return;
+    e.target.disabled = true;
+    const pre = document.getElementById('sys-patch-term');
+    document.getElementById('sys-patch-op').hidden = false;
+    pre.textContent = '';
+    const code = await stream('POST', '/api/system/patches', (txt) => appendTo(pre, txt), undefined, { enabled: on })
+      .catch((err) => { appendTo(pre, `\n${err.message}\n`); return 1; });
+    toast(t(code === 0 ? 'toast.done' : 'toast.failed'));
+    if (code === 0) setTimeout(() => settingsServer(body, true), 800);
+    else e.target.disabled = false;
+  });
+  document.getElementById('sys-ar')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await api('PUT', '/api/system/auto-reboot', {
+        enabled: document.getElementById('sys-ar-on').checked,
+        time: document.getElementById('sys-ar-time').value,
+      });
+      document.getElementById('sys-ar-out').innerHTML = '';
+      toast(t('set.saved'));
+    } catch (err) {
+      document.getElementById('sys-ar-out').innerHTML = errorBox(err);
+    }
+  });
+}
+
+/** While the server restarts: a notice that stays until the panel answers again. */
+function showRebooting() {
+  document.getElementById('dialog')?.remove();
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="overlay" id="dialog">
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title" style="max-width:460px">
+        <div class="db">
+          <h2 id="dlg-title" style="margin:0 0 10px">${t('sys.rebootingTitle')}</h2>
+          <div class="progress indeterminate"><span></span></div>
+          <p class="hint" style="margin:12px 0 0">${t('sys.rebootingHint')}</p>
+        </div>
+      </div>
+    </div>`);
+  // A server restart takes a while (containers stop first): reload only when a new panel answers.
+  waitForRestart(null, Infinity);
+  setTimeout(() => {
+    const hint = document.querySelector('#dialog .hint');
+    if (hint) hint.textContent = t('sys.rebootSlow');
+  }, 10 * 60e3);
+}
+
 // After a self-update the panel restarts. Reload as soon as a new panel process answers
 // (its bootId changes); after 30 s reload anyway – if the update is still running,
 // the reloaded page shows the notice again and keeps waiting. After the reload the
@@ -1789,7 +2034,7 @@ function settingsUpdates(body, s) {
 const RESTART_FALLBACK_MS = 30e3;
 const JUST_UPDATED_KEY = 'sm-just-updated';
 let restartTimer = null;
-function waitForRestart(beforeReload) {
+function waitForRestart(beforeReload, fallbackMs = RESTART_FALLBACK_MS) {
   if (restartTimer) return;
   const before = state.bootId;
   const started = Date.now();
@@ -1797,7 +2042,7 @@ function waitForRestart(beforeReload) {
     let st = null;
     try { st = await fetch('/api/state', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)); } catch { /* panel is down */ }
     // Reload only when the panel answers – never onto an error page while it is down.
-    if (st && (st.bootId !== before || Date.now() - started >= RESTART_FALLBACK_MS)) {
+    if (st && (st.bootId !== before || Date.now() - started >= fallbackMs)) {
       clearInterval(restartTimer);
       try { sessionStorage.setItem(JUST_UPDATED_KEY, '1'); } catch { /* ignore */ }
       beforeReload?.();
