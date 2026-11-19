@@ -30,7 +30,7 @@ Run the same command again to update. Optional settings: `curl ... | sudo PORT=8
 - Start, Restart, Update (pull + up), Stop, Shut down – with live output
 - live logs, containers with ports, operation history
 - deleting a stack moves its folder to `.trash/` – nothing is lost by accident
-- automatic stack updates on chosen days (off by default): backup first, back to the previous images if the new ones don't start
+- automatic stack updates on chosen days (off by default): backup first, back to the previous images if the new ones don't start, and one click to restore the state before the update – images, files and databases, like in Cloudron
 - restart the server from the panel or on a schedule; stacks that were running start again – also those without `restart:`
 - notifications by e-mail, Telegram, ntfy, Pushover or webhook – e.g. when a backup fails, a stack stops or the VPN goes down
 - public addresses through your own Pangolin – the panel creates the site, runs Newt and adds resources by itself
@@ -81,7 +81,7 @@ docker exec stackmoor node src/cli.js unlock
 - **Before every update** the stack is backed up; if the backup fails, the update does not run.
 - **Checksums:** restic stores every piece of data under its SHA-256 checksum. Every run checks the repository, once a week 10% of the data is read back and compared, and *Verify everything* checks all of it.
 - **Retention:** daily, weekly and monthly backups to keep; older ones are removed automatically.
-- **Restore** from the stack's *Backups* tab: the current folder goes to the trash, the files come back, databases are loaded from their dumps and the stack starts. Restoring under a different name makes a copy. Backups are listed per run, and *Restore all stacks* brings back every stack of a run.
+- **Restore** from the stack's *Backups* tab: the current folder goes to the trash, the files come back together with the exact images the stack ran (pulled again by digest if they are gone), databases are loaded from their dumps and the stack starts. A database import that reports errors is not taken as a success. Restoring under a different name makes a copy. Backups are listed per run, and *Restore all stacks* brings back every stack of a run.
 - **New server:** on a fresh install choose *Restore a server from a backup*, enter the bucket and the encryption password, pick a backup – the panel's settings, your account, domains and all stacks with their databases come back.
 
 > Keep the encryption password safe. Without it nobody can restore the backups.
@@ -111,6 +111,7 @@ What goes through the tunnel follows `AllowedIPs` in your file. **Kill switch is
 - [x] Pangolin – public addresses next to the local domain, with Pangolin's login in front; folders left out of backups
 - [x] Security hardening (0.13): setup code for a fresh install, forwarded headers trusted only from Caddy, async password hashing, security headers, checked restores; starting page from Caddy
 - [x] A separate internal Docker network for Caddy and the panel – apps can't reach the panel directly (0.13.1)
+- [x] Restore like Cloudron (0.14): backups record the exact images, a restore brings back images, files and databases; *Restore the state before the update* after a failed automatic update; the installer prints a link that fills in the setup code
 - [ ] More hardening: stricter VPN config checks, safer file writes in stack folders
 - [ ] More interface languages
 - [ ] Unraid Community Apps template

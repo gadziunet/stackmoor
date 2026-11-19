@@ -30,7 +30,7 @@ Ponowne uruchomienie tego samego polecenia aktualizuje panel. Opcjonalnie: `curl
 - Uruchom, Restart, Aktualizuj (pull + up), Zatrzymaj, Wyłącz – z wyjściem na żywo
 - logi na żywo, kontenery z portami, historia operacji
 - usuwanie stacka przenosi folder do `.trash/` – nic nie znika przypadkiem
-- automatyczne aktualizacje stacków w wybrane dni (domyślnie wyłączone): najpierw kopia, powrót do poprzednich obrazów, gdy nowe się nie uruchomią
+- automatyczne aktualizacje stacków w wybrane dni (domyślnie wyłączone): najpierw kopia, powrót do poprzednich obrazów, gdy nowe się nie uruchomią, i jedno kliknięcie, żeby przywrócić stan sprzed aktualizacji – obrazy, pliki i bazy danych, jak w Cloudronie
 - restart serwera z panelu albo według harmonogramu; stacki, które działały, uruchamiają się ponownie – także te bez `restart:`
 - powiadomienia e-mailem, przez Telegram, ntfy, Pushover albo webhook – np. gdy nie uda się kopia, stack przestanie działać albo padnie VPN
 - publiczne adresy przez Twojego Pangolina – panel sam tworzy site, uruchamia Newt i dodaje zasoby
@@ -90,7 +90,7 @@ Zakładka **Kopie** → **Ustawienia kopii:** wybierz magazyn (Backblaze B2, Ama
 - **Przed każdą aktualizacją** robiona jest kopia stacka; jeśli się nie uda, aktualizacja się nie wykona.
 - **Sumy kontrolne:** restic zapisuje każdy kawałek danych pod jego sumą SHA-256. Każde uruchomienie sprawdza repozytorium, raz w tygodniu 10% danych jest pobierane i porównywane, a *Zweryfikuj wszystko* sprawdza całość.
 - **Rotacja:** ile kopii dziennych, tygodniowych i miesięcznych trzymać; starsze są usuwane automatycznie.
-- **Przywracanie** z zakładki *Kopie* w stacku: obecny folder trafia do kosza, pliki wracają, bazy są wczytywane ze zrzutów, a stack się uruchamia. Przywrócenie pod inną nazwą tworzy kopię. Kopie są pogrupowane po uruchomieniu, a *Przywróć wszystkie stacki* odtwarza wszystkie stacki z danego uruchomienia.
+- **Przywracanie** z zakładki *Kopie* w stacku: obecny folder trafia do kosza, pliki wracają razem z dokładnie tymi obrazami, na których stack działał (pobieranymi ponownie po digeście, jeśli ich nie ma), bazy są wczytywane ze zrzutów, a stack się uruchamia. Import bazy, który zgłasza błędy, nie jest uznawany za udany. Przywrócenie pod inną nazwą tworzy kopię. Kopie są pogrupowane po uruchomieniu, a *Przywróć wszystkie stacki* odtwarza wszystkie stacki z danego uruchomienia.
 - **Nowy serwer:** na świeżej instalacji wybierz *Przywróć serwer z kopii zapasowej*, podaj bucket i hasło szyfrowania, wybierz kopię – wracają ustawienia panelu, Twoje konto, domeny i wszystkie stacki razem z bazami.
 
 > Przechowuj hasło szyfrowania w bezpiecznym miejscu. Bez niego nikt nie przywróci kopii.
@@ -120,6 +120,7 @@ To, co idzie tunelem, wynika z `AllowedIPs` w Twoim pliku. **Blokada (kill switc
 - [x] Pangolin – publiczne adresy obok lokalnej domeny, z logowaniem Pangolina przed aplikacją; foldery pomijane w kopiach
 - [x] Wzmocnienie bezpieczeństwa (0.13): kod instalacyjny przy nowej instalacji, przekazywane nagłówki tylko od Caddy, asynchroniczne hashowanie haseł, nagłówki bezpieczeństwa, sprawdzane przywracanie; strona ładowania z Caddy
 - [x] Osobna, wewnętrzna sieć Dockera dla Caddy i panelu – aplikacje nie mają bezpośredniego dostępu do panelu (0.13.1)
+- [x] Przywracanie jak w Cloudronie (0.14): kopie zapisują dokładne obrazy, przywrócenie sprowadza obrazy, pliki i bazy danych; *Przywróć stan sprzed aktualizacji* po nieudanej automatycznej aktualizacji; instalator wypisuje link, który sam wpisuje kod instalacyjny
 - [ ] Dalsze wzmocnienia: ściślejsze sprawdzanie konfiguracji VPN, bezpieczniejszy zapis plików w folderach stacków
 - [ ] Więcej języków interfejsu
 - [ ] Szablon Unraid w Community Apps

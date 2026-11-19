@@ -203,7 +203,7 @@ function renderAuth() {
       <h1>${t(setup ? 'auth.welcome' : 'auth.login')}</h1>
       <p>${t(setup ? 'auth.setupLead' : 'auth.loginLead')}</p>
       ${setup ? `<div class="field"><label for="sc">${t('auth.setupCode')}</label>
-        <input type="text" id="sc" autocomplete="off" autocapitalize="characters" spellcheck="false" required placeholder="XXXX-XXXX-XXXX" value="${esc(setupCode.get())}">
+        <input type="text" id="sc" autocomplete="off" autocapitalize="characters" spellcheck="false" required placeholder="XXXX-XXXX-XXXX" value="${esc(setupCode.get().match(/.{1,4}/g)?.join('-') || '')}">
         <p class="hint">${t('auth.setupCodeHint')}</p>
         <code class="cmd">docker logs stackmoor | grep "Setup"</code></div>` : ''}
       <div class="field"><label for="u">${t('auth.username')}</label>
@@ -3079,8 +3079,8 @@ async function showPendingRestore(name) {
       <strong>${t(run.result === 'rolledBack' ? 'pu.titleBack' : 'pu.titleFailed', { date: esc(fmtDate(run.since || run.at)) })}</strong>
       ${run.reason ? `<p class="hint" style="margin:4px 0">${esc(run.reason)}</p>` : ''}
       <p style="margin:6px 0">${t('pu.lead')}</p>
-      <div class="row" id="pu-start"><button type="button" class="btn primary small" id="pu-open">${t('pu.restore')}</button>
-        <button type="button" class="btn small" id="pu-dismiss">${t('pu.dismiss')}</button></div>
+      <div id="pu-start"><div class="row"><button type="button" class="btn primary small" id="pu-open">${t('pu.restore')}</button>
+        <button type="button" class="btn small" id="pu-dismiss">${t('pu.dismiss')}</button></div></div>
       <div id="pu-confirm" hidden>
         <p style="margin:6px 0">${t('pu.snapshot', { date: esc(fmtDate(run.snapshotTime)) })}</p>
         <p class="hint" style="margin:6px 0">${t('bak.restoreLead')}</p>
