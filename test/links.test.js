@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { openTargets, portHost } from '../public/links.js';
+import { openTargets, portHost, setupCodeFromHash } from '../public/links.js';
 
 const containers = [{ ports: ['3001→3001/tcp', '8443→443/tcp', '53→53/udp'] }];
 
@@ -26,4 +26,13 @@ test('links: a stack with subdomains opens them (https through Caddy), whatever 
   // no subdomains left: back to the ports
   assert.deepEqual(openTargets({ domain: 'example.com', routes: [], containers, hostname: '192.168.1.10' }),
     ['http://192.168.1.10:3001', 'https://192.168.1.10:8443']);
+});
+
+test('setup link: the code after #setup= and nothing else', () => {
+  assert.equal(setupCodeFromHash('#setup=K7QM-4XWD-9TPA'), 'K7QM-4XWD-9TPA');
+  assert.equal(setupCodeFromHash('#setup=k7qm4xwd9tpa'), 'k7qm4xwd9tpa');
+  assert.equal(setupCodeFromHash('#/stack/demo'), null);
+  assert.equal(setupCodeFromHash('#setup='), null);
+  assert.equal(setupCodeFromHash('#setup=<script>'), null);
+  assert.equal(setupCodeFromHash(''), null);
 });

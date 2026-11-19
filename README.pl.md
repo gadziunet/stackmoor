@@ -16,7 +16,7 @@ Na czystym Debianie, Ubuntu albo Raspberry Pi OS (x86_64 lub arm64):
 curl -fsSL https://raw.githubusercontent.com/gadziunet/stackmoor/main/install.sh | sudo bash
 ```
 
-Skrypt instaluje Dockera, jeśli go brakuje, uruchamia Stackmoor i wypisuje adres oraz jednorazowy kod instalacyjny, np. `http://192.168.1.50:5001` i `K7QM-4XWD-9TPA`. Przy pierwszym wejściu wpisujesz kod i tworzysz konto administratora – dzięki temu nikt inny w Twojej sieci nie zrobi tego przed Tobą. Zgubiony kod: `docker logs stackmoor | grep "Setup code"`.
+Skrypt instaluje Dockera, jeśli go brakuje, uruchamia Stackmoor i wypisuje link z jednorazowym kodem instalacyjnym, np. `http://192.168.1.50:5001/#setup=K7QM-4XWD-9TPA`. Otwierasz go i kod jest już wpisany, gdy tworzysz konto administratora – dzięki temu nikt inny w Twojej sieci nie zrobi tego przed Tobą. Kod zostaje w przeglądarce (część po `#` nie jest wysyłana do serwera) i działa tylko raz. Zgubiony link: `docker logs stackmoor | grep "Setup"`.
 
 Ponowne uruchomienie tego samego polecenia aktualizuje panel. Opcjonalnie: `curl ... | sudo PORT=8080 STACKS_DIR=/srv/stacks bash`.
 

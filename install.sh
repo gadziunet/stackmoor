@@ -239,10 +239,13 @@ else
   bold "Stackmoor is running."
 fi
 echo
-echo "  Open:   http://${IP}:${PORT}"
-# First run only: the code the panel asks for before the account can be created.
+# First run only: the code the panel asks for before the account can be created. The link
+# carries it after "#", so the browser fills it in and never sends it to the server.
 if SETUP_CODE="$(docker exec stackmoor node src/cli.js setup-code 2>/dev/null)" && [ -n "$SETUP_CODE" ]; then
-  echo "  Code:   ${SETUP_CODE}   (asked when you create the account; also in: docker logs stackmoor)"
+  echo "  Open:   http://${IP}:${PORT}/#setup=${SETUP_CODE}"
+  echo "          (this link fills in the one-time setup code ${SETUP_CODE} for you)"
+else
+  echo "  Open:   http://${IP}:${PORT}"
 fi
 echo "  Logs:   docker logs -f stackmoor"
 echo "  Update: run this installer again"

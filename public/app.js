@@ -1,6 +1,6 @@
 // Stackmoor UI – no framework, no build step.
 import { t, lang, setLang, LANGS } from './i18n.js';
-import { openTargets as buildTargets } from './links.js';
+import { openTargets as buildTargets, setupCodeFromHash } from './links.js';
 
 const app = document.getElementById('app');
 const state = { user: null, needsSetup: false, stacks: [], refreshTimer: null, abort: null, version: '' };
@@ -205,7 +205,7 @@ function renderAuth() {
       ${setup ? `<div class="field"><label for="sc">${t('auth.setupCode')}</label>
         <input type="text" id="sc" autocomplete="off" autocapitalize="characters" spellcheck="false" required placeholder="XXXX-XXXX-XXXX" value="${esc(setupCode.get())}">
         <p class="hint">${t('auth.setupCodeHint')}</p>
-        <code class="cmd">docker logs stackmoor | grep "Setup code"</code></div>` : ''}
+        <code class="cmd">docker logs stackmoor | grep "Setup"</code></div>` : ''}
       <div class="field"><label for="u">${t('auth.username')}</label>
         <input type="text" id="u" autocomplete="username" autocapitalize="off" required value="${setup ? 'admin' : ''}"></div>
       <div class="field"><label for="p">${t('auth.password')}</label>
@@ -3722,9 +3722,17 @@ function render() {
 }
 
 async function boot() {
+  // Opened from the installer's link: take the setup code and remove it from the address bar
+  // (and so from the history), before anything else reads the address.
+  const linkCode = setupCodeFromHash(location.hash);
+  if (linkCode) {
+    setupCode.set(linkCode);
+    history.replaceState(null, '', location.pathname + location.search);
+  }
   const s = await api('GET', '/api/state');
   state.user = s.user;
   state.needsSetup = s.needsSetup;
+  if (!s.needsSetup && !s.restoring) setupCode.clear(); // an old link opened after the account exists
   if (s.restoring) state.wizard = 'progress';
   state.version = !s.version ? '' : /^\d/.test(s.version) ? `v${s.version}` : s.version;
   state.stacksDir = s.stacksDir;

@@ -16,7 +16,7 @@ On a clean Debian, Ubuntu or Raspberry Pi OS machine (x86_64 or arm64):
 curl -fsSL https://raw.githubusercontent.com/gadziunet/stackmoor/main/install.sh | sudo bash
 ```
 
-The script installs Docker if it's missing, starts Stackmoor and prints its address and a one-time setup code, e.g. `http://192.168.1.50:5001` and `K7QM-4XWD-9TPA`. On first visit you enter the code and create the administrator account – so nobody else on your network can do it before you. Lost the code? `docker logs stackmoor | grep "Setup code"`.
+The script installs Docker if it's missing, starts Stackmoor and prints a link with a one-time setup code, e.g. `http://192.168.1.50:5001/#setup=K7QM-4XWD-9TPA`. Open it, and the code is already filled in when you create the administrator account – so nobody else on your network can do it before you. The code stays in your browser (after `#` it is never sent to the server) and works only once. Lost it? `docker logs stackmoor | grep "Setup"`.
 
 Run the same command again to update. Optional settings: `curl ... | sudo PORT=8080 STACKS_DIR=/srv/stacks bash`.
 

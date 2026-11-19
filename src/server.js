@@ -195,7 +195,10 @@ function setupOnly(req, res, next) {
 const setupToken = createSetupToken({ dataDir: config.dataDir, hasUsers });
 {
   const code = setupToken.ensure();
-  if (code) console.log(`Setup code: ${code}  (the panel asks for it when you create the account)`);
+  if (code) {
+    console.log(`Setup code: ${code}  (the panel asks for it when you create the account)`);
+    console.log(`Setup link: http://<server-address>:<port>/#setup=${code}  (fills the code in for you)`);
+  }
 }
 const requireSetupCode = (req, res, next) => (setupToken.check(req.get('X-Setup-Code'))
   ? next()

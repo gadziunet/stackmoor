@@ -12,7 +12,7 @@ const dict = {
     'auth.password': 'Password',
     'auth.minLength': 'At least 10 characters.',
     'auth.setupCode': 'Setup code',
-    'auth.setupCodeHint': 'Shown at the end of the installer. You can also see it on the server with this command:',
+    'auth.setupCodeHint': 'Filled in for you when you open the link shown at the end of the installer. You can also see the code on the server with this command:',
     'auth.create': 'Create account',
     'auth.submit': 'Log in',
 
@@ -737,7 +737,7 @@ const dict = {
     'auth.password': 'Hasło',
     'auth.minLength': 'Minimum 10 znaków.',
     'auth.setupCode': 'Kod instalacyjny',
-    'auth.setupCodeHint': 'Pokazuje go instalator na końcu instalacji. Na serwerze zobaczysz go też tym poleceniem:',
+    'auth.setupCodeHint': 'Wpisuje się sam, gdy otworzysz link pokazany na końcu instalacji. Na serwerze zobaczysz kod też tym poleceniem:',
     'auth.create': 'Utwórz konto',
     'auth.submit': 'Zaloguj',
 

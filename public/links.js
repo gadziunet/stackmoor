@@ -30,3 +30,12 @@ export function openTargets({ domain, routes, containers, hostname, serverIp }) 
   }
   return [...new Set(urls)];
 }
+
+/**
+ * The setup code from a link like http://192.168.1.10:5001/#setup=K7QM-4XWD-9TPA (printed by
+ * the installer). After "#" so the browser never sends it to the server or any proxy logs.
+ */
+export function setupCodeFromHash(hash) {
+  const m = /^#setup=([A-Za-z0-9-]{1,40})$/.exec(String(hash || ''));
+  return m ? m[1] : null;
+}
