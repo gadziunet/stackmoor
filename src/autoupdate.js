@@ -133,7 +133,14 @@ export function createAutoUpdate({ db, stacks, updates, backups, getSettings, sa
     }
     const reason = t(`auto.reason.${health.reason}`, { service: health.service || '', code: health.code ?? '' });
     const back = await rollback(name, before, reason, t, write);
-    return { at, stack: name, result: back ? 'rolledBack' : 'rollbackFailed', images: newer, reason };
+    // The images go back on their own; the data (files, databases) only when the admin
+    // chooses to restore the backup made just before this update – as in Cloudron.
+    // An earlier failed try still waiting for the admin keeps its backup: the newer one was made
+    // after that broken version had already run (and maybe changed the data).
+    const earlier = pendingRestore(name);
+    const snapshot = earlier?.snapshot || backups.preUpdateSince?.(name, at)?.snapshot || null;
+    const since = earlier ? earlier.since || earlier.at : undefined;
+    return { at, stack: name, result: back ? 'rolledBack' : 'rollbackFailed', images: newer, reason, snapshot, ...(since ? { since } : {}) };
   }
 
   /** Updates all chosen running stacks, one after another. */
@@ -179,6 +186,33 @@ export function createAutoUpdate({ db, stacks, updates, backups, getSettings, sa
     return next;
   }
 
+  /** Hides the "restore the state before the update" notice of one run. */
+  function dismiss(stack, at) {
+    const list = runs();
+    const r = list.find((x) => x.stack === stack && x.at === at);
+    if (!r) return false;
+    r.dismissed = true;
+    setState(db, 'autoupdate.runs', list);
+    return true;
+  }
+
+  /**
+   * The failed automatic update of a stack whose data can still be brought back from before it.
+   * It ends when hidden, after a working update, or once the stack was updated or restored by hand.
+   */
+  function pendingRestore(stack) {
+    for (const r of runs()) {
+      if (r.stack !== stack) continue;
+      if (r.result === 'updated') return null;
+      if (!['rolledBack', 'rollbackFailed'].includes(r.result)) continue; // "failed": nothing changed
+      if (!r.snapshot || r.dismissed) return null;
+      const since = String(r.at).slice(0, 19).replace('T', ' ');
+      const later = db.prepare(`SELECT 1 FROM operations WHERE stack = ? AND action IN ('update', 'restore') AND status = 'ok' AND finished_at > ? LIMIT 1`).get(stack, since);
+      return later ? null : r;
+    }
+    return null;
+  }
+
   function status() {
     return {
       config: config(),
@@ -199,7 +233,7 @@ export function createAutoUpdate({ db, stacks, updates, backups, getSettings, sa
     setInterval(tick, 60_000).unref();
   }
 
-  return { runAll, updateStack, status, saveConfig, startScheduler, busy: () => Boolean(running) };
+  return { runAll, updateStack, status, saveConfig, startScheduler, dismiss, pendingRestore, busy: () => Boolean(running) };
 }
 
 

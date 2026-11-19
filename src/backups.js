@@ -8,7 +8,7 @@ import { encrypt, decrypt, mask, initSecrets } from './secrets.js';
 import {
   DESTINATIONS, destinationById, repoUrl, dumpKind, dumpCommand, restoreCommand, readyCommand,
   DUMP_FILE, dataFolders, containerName, retentionArgs, isDue, localParts, newRunId, groupRuns, cleanExcludes, excludeArgs,
-  snapshotStack, cleanManifest,
+  snapshotStack, cleanManifest, recordImages, imagesPlan, psqlLine, sharedRefs, limitedShell, DB_TIMEOUTS,
 } from './backup-plan.js';
 
 // Backups with restic, the Cloudron way:
@@ -20,6 +20,7 @@ import {
 //   (restic stores every piece under its SHA-256 checksum; `check` verifies them).
 
 const DUMPS = '.stackmoor-dumps';
+const IMAGES_FILE = 'images.json';
 const HOST = 'stackmoor';
 const MAX_LOG = 100_000;
 
@@ -40,8 +41,11 @@ const DEFAULTS = {
   verifyWeekly: true,
 };
 
-/** Runs a command; stdout/stdin can go to/from files (database dumps can be large). */
-function run(cmd, args, { env, stdoutFile, stdinFile, onStdout, onStderr } = {}) {
+/**
+ * Runs a command; stdout/stdin can go to/from files (database dumps can be large).
+ * timeout (ms): the command is stopped and the result has timedOut: true.
+ */
+function run(cmd, args, { env, stdoutFile, stdinFile, onStdout, onStderr, timeout } = {}) {
   return new Promise((resolve) => {
     let child;
     try {
@@ -62,8 +66,8 @@ function run(cmd, args, { env, stdoutFile, stdinFile, onStdout, onStderr } = {})
         onStdout?.(s);
       });
     }
-    child.stderr.on('data', (d) => {
-      const s = d.toString();
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (s) => {
       stderr = (stderr + s).slice(-20_000);
       onStderr?.(s);
     });
@@ -74,8 +78,11 @@ function run(cmd, args, { env, stdoutFile, stdinFile, onStdout, onStderr } = {})
       input.pipe(child.stdin);
     }
     child.on('error', (err) => { stderr += `\n${err.message}`; });
+    let timedOut = false;
+    const timer = timeout ? setTimeout(() => { timedOut = true; child.kill('SIGTERM'); }, timeout) : null;
     child.on('close', (code) => {
-      const done = () => resolve({ code: code ?? 1, stdout, stderr });
+      clearTimeout(timer);
+      const done = () => resolve({ code: timedOut ? 124 : code ?? 1, stdout, stderr, timedOut });
       if (out) out.close(done); else done();
     });
   });
@@ -277,16 +284,18 @@ export function createBackups({ db, stacks, stacksDir, dataDir, sqlite }) {
         continue;
       }
       if (kind === 'redis') {
-        await docker(['exec', container, 'sh', '-c', dumpCommand(kind)]);
+        await docker(['exec', container, ...limitedShell(dumpCommand(kind), DB_TIMEOUTS.redisSave)], { signal: AbortSignal.timeout(DB_TIMEOUTS.redisSave + 60e3) });
         continue;
       }
       fs.mkdirSync(dumps, { recursive: true, mode: 0o700 });
       const file = path.join(dumps, `${svc}.${DUMP_FILE[kind]}`);
       log(t('backup.log.dumping', { service: svc, kind }) + '\n');
-      const r = await run('docker', ['exec', container, 'sh', '-c', dumpCommand(kind)], { stdoutFile: file });
+      const r = await run('docker', ['exec', container, ...limitedShell(dumpCommand(kind), DB_TIMEOUTS.dump)], { stdoutFile: file, timeout: DB_TIMEOUTS.dump + 60e3 });
       const size = fs.existsSync(file) ? fs.statSync(file).size : 0;
       if (r.code !== 0 || size === 0) {
-        throw new UserError('backup.dumpFailed', { service: svc, output: r.stderr.trim().slice(-800) });
+        // 124: the limit inside the container (timeout), timedOut: the one here.
+        const output = r.timedOut || r.code === 124 ? t('backup.timedOut', { hours: DB_TIMEOUTS.dump / 3600e3 }) : r.stderr.trim().slice(-800);
+        throw new UserError('backup.dumpFailed', { service: svc, output });
       }
       manifest.push({ service: svc, kind, file: path.basename(file), size });
       excludes.push(...dataFolders(dir, def));
@@ -295,6 +304,38 @@ export function createBackups({ db, stacks, stacksDir, dataDir, sqlite }) {
       fs.writeFileSync(path.join(dumps, 'manifest.json'), JSON.stringify({ version: 1, dumps: manifest }, null, 2));
     }
     return { dumps, excludes, manifest };
+  }
+
+  /**
+   * Writes <stack>/.stackmoor-dumps/images.json: the exact image every service runs (or, for a
+   * stopped stack, the image its compose file names now), so a restore can bring it back.
+   */
+  async function saveImages(name, cfg, dumps, log, t) {
+    const ids = await stacks.compose(name, ['ps', '-a', '-q']);
+    const list = ids.code === 0 ? ids.stdout.split('\n').map((x) => x.trim()).filter(Boolean) : [];
+    let containers = [];
+    if (list.length) {
+      const r = await docker(['inspect', ...list]);
+      try { containers = r.code === 0 ? JSON.parse(r.stdout) : []; } catch { containers = []; }
+    }
+    const running = new Set(containers.map((c) => c.Config?.Labels?.['com.docker.compose.service']));
+    // Services without a container: the image the compose file names, if it is here.
+    for (const [svc, def] of Object.entries(cfg.services || {})) {
+      if (running.has(svc) || !def.image) continue;
+      const r = await docker(['image', 'inspect', '--format', '{{.Id}}', def.image]);
+      if (r.code === 0) containers.push({ Config: { Image: def.image, Labels: { 'com.docker.compose.service': svc } }, Image: r.stdout.trim() });
+    }
+    const imageIds = [...new Set(containers.map((c) => c.Image).filter(Boolean))];
+    let images = [];
+    if (imageIds.length) {
+      const r = await docker(['image', 'inspect', ...imageIds]);
+      try { images = r.code === 0 ? JSON.parse(r.stdout) : []; } catch { images = []; }
+    }
+    const record = recordImages(containers, images);
+    if (!record.images.length) return;
+    fs.mkdirSync(dumps, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(path.join(dumps, IMAGES_FILE), JSON.stringify(record, null, 2));
+    log(t('backup.log.imagesSaved', { images: record.images.map((i) => `${i.service}: ${i.ref}`).join(', ') }) + '\n');
   }
 
   function summaryOf(stdout) {
@@ -314,6 +355,8 @@ export function createBackups({ db, stacks, stacksDir, dataDir, sqlite }) {
     const { dumps, excludes } = await dumpDatabases(name, cfg, log, t);
     const skipped = stackExcludes(name);
     try {
+      // The images are extra information: not being able to read them must not stop the backup.
+      try { await saveImages(name, cfg, dumps, log, t); } catch (err) { log(t('backup.log.imagesNotSaved', { message: err.message }) + '\n'); }
       const args = ['backup', dir, '--host', HOST, '--json', '--exclude-caches',
         ...['stack:' + name, ...tags].flatMap((tag) => ['--tag', tag]),
         ...excludes.flatMap((e) => ['--exclude', e]),
@@ -330,7 +373,7 @@ export function createBackups({ db, stacks, stacksDir, dataDir, sqlite }) {
         size: formatBytes(sum?.total_bytes_processed || 0),
         added: formatBytes(sum?.data_added || 0),
       }) + '\n');
-      return { added: sum?.data_added || 0, size: sum?.total_bytes_processed || 0, snapshot: sum?.snapshot_id?.slice(0, 8) };
+      return { added: sum?.data_added || 0, size: sum?.total_bytes_processed || 0, snapshot: sum?.snapshot_id?.slice(0, 8), snapshotId: sum?.snapshot_id || null };
     } finally {
       fs.rmSync(dumps, { recursive: true, force: true });
     }
@@ -436,8 +479,18 @@ export function createBackups({ db, stacks, stacksDir, dataDir, sqlite }) {
       await ensureRepo(log);
       await restic(['unlock'], log, { quiet: true });
       const r = await backupStack(name, tags, log, t);
+      // The newest before-update backup of each stack: "restore the state before the update".
+      if (preUpdate && r.snapshotId) {
+        setState(db, 'backup.preUpdate', { ...getState(db, 'backup.preUpdate', {}), [name]: { snapshot: r.snapshotId, at: new Date().toISOString() } });
+      }
       return { added: r.added, snapshot: r.snapshot };
     }, extraLog);
+  }
+
+  /** The before-update backup of a stack made since `since` (ISO time), or null. */
+  function preUpdateSince(name, since) {
+    const p = getState(db, 'backup.preUpdate', {})[name];
+    return p && (!since || p.at >= since) ? p : null;
   }
 
   // Before updating a stack (hooked into stacks.action).
@@ -509,6 +562,78 @@ export function createBackups({ db, stacks, stacksDir, dataDir, sqlite }) {
     return match(await snapshots()) || match(await snapshots({ fresh: true })) || null;
   }
 
+  /**
+   * Brings back the images recorded in the backup: the same image id if Docker still has it,
+   * otherwise downloaded by its digest. Each gets the name the compose file uses, so the stack
+   * starts with exactly the images it ran when it was backed up.
+   * Returns true when every service got its image (then nothing is downloaded on start).
+   */
+  async function restoreImages(name, dumps, cfg, out, t) {
+    let record = null;
+    try { record = JSON.parse(fs.readFileSync(path.join(dumps, IMAGES_FILE), 'utf8')); } catch { /* older backup */ }
+    if (!record) {
+      out(t('backup.log.noImages') + '\n');
+      return false;
+    }
+    const plan = imagesPlan(record, cfg.services || {});
+    let all = plan.length > 0;
+    // Config.Image: `docker ps` shows an id instead of the name once the name points elsewhere.
+    const ids = (await docker(['ps', '-a', '-q'])).stdout.split('\n').map((x) => x.trim()).filter(Boolean);
+    const ps = ids.length ? await docker(['inspect', '--format', '{{index .Config.Labels "com.docker.compose.project"}}\t{{.Config.Image}}', ...ids]) : { code: 0, stdout: '' };
+    const shared = sharedRefs(ps.code === 0 ? ps.stdout : '', name);
+    for (const p of plan) {
+      if (shared.has(p.ref)) {
+        // Docker's image names are shared by the whole server: the other stacks keep theirs.
+        all = false;
+        out(t('backup.log.imageShared', { service: p.service, ref: p.ref, stacks: shared.get(p.ref).join(', ') }) + '\n');
+        continue;
+      }
+      const here = p.id && (await docker(['image', 'inspect', '--format', '{{.Id}}', p.id])).code === 0;
+      let source = here ? p.id : null;
+      if (!here && p.digest) {
+        out(`$ docker pull ${p.digest}\n`);
+        const pull = await docker(['pull', p.digest], { onData: out });
+        if (pull.code === 0) source = p.digest;
+      }
+      const tag = source && !p.ref.startsWith('-') ? await docker(['tag', source, p.ref]) : null;
+      if (tag?.code === 0) {
+        out(t('backup.log.imageRestored', { service: p.service, ref: p.ref, id: (p.id || p.digest).replace(/^.*sha256:/, '').slice(0, 12) }) + '\n');
+      } else {
+        all = false;
+        out(t('backup.log.imageMissing', { service: p.service, ref: p.ref }) + '\n');
+      }
+    }
+    // Services with an image but nothing recorded (e.g. added later) start as they are.
+    const imaged = Object.entries(cfg.services || {}).filter(([, d]) => d.image && !String(d.image).includes('@')).map(([svc]) => svc);
+    if (imaged.some((svc) => !plan.some((p) => p.service === svc))) all = false;
+    return all;
+  }
+
+  /** Imports one database dump; for PostgreSQL every error line counts, not only the exit code. */
+  async function importDump(container, m, file, out, t) {
+    const errors = [];
+    let ignored = 0;
+    let rest = '';
+    const onStderr = m.kind !== 'postgres' ? undefined : (chunk) => {
+      const lines = (rest + chunk).split('\n');
+      rest = lines.pop();
+      for (const line of lines) {
+        const k = psqlLine(line);
+        if (k === 'ignored') ignored += 1;
+        else if (k === 'error' && errors.length < 20) errors.push(line.trim());
+      }
+    };
+    const imp = await run('docker', ['exec', '-i', container, ...limitedShell(restoreCommand(m.kind), DB_TIMEOUTS.import)], {
+      stdinFile: file, onStdout: out, onStderr, timeout: DB_TIMEOUTS.import + 60e3,
+    });
+    if (onStderr && rest) onStderr('\n');
+    if (ignored) out(t('backup.log.importIgnored', { service: m.service, count: ignored }) + '\n');
+    if (imp.timedOut || imp.code === 124) throw new UserError('backup.importFailed', { service: m.service, output: t('backup.timedOut', { hours: DB_TIMEOUTS.import / 3600e3 }) });
+    if (imp.code !== 0 || errors.length) {
+      throw new UserError('backup.importFailed', { service: m.service, output: (errors.length ? errors.join('\n') : imp.stderr.trim()).slice(-1500) });
+    }
+  }
+
   /** Restores one stack snapshot into stack `name`. Writes to out(). */
   async function restoreStack(snap, name, log, t) {
     // The name becomes a folder in the stacks folder: never anything else (e.g. from a snapshot tag).
@@ -534,26 +659,37 @@ export function createBackups({ db, stacks, stacksDir, dataDir, sqlite }) {
       const dumps = path.join(dir, DUMPS);
       let manifest = [];
       try { manifest = JSON.parse(fs.readFileSync(path.join(dumps, 'manifest.json'), 'utf8')).dumps || []; } catch { /* no databases */ }
+      let cfg = null;
+      try { cfg = await stacks.config(name); } catch (err) {
+        if (manifest.length) throw err;
+        out(t('backup.log.noConfigRestore') + '\n');
+      }
+      // The images first: the databases must start with the version that wrote the dump,
+      // and prepare() must not download a newer image to read its volumes from.
+      const pinned = cfg ? await restoreImages(name, dumps, cfg, out, t) : false;
+      await stacks.prepare(name, out, t);
+      if (manifest.length) cfg = await stacks.config(name); // prepare may have added volumes
+      // Every image is the one from the backup: starting must not download newer ones.
+      const noPull = pinned ? ['--pull', 'never'] : [];
       if (manifest.length) {
         // Databases start empty (their files were not in the backup) and get the dump.
-        await stacks.prepare(name, out, t);
-        const cfg = await stacks.config(name);
         manifest = cleanManifest(manifest, Object.keys(cfg.services || {}));
-        const up = await stacks.compose(name, ['up', '-d', ...manifest.map((m) => m.service)], out);
+        const up = await stacks.compose(name, ['up', '-d', ...noPull, ...manifest.map((m) => m.service)], out);
         if (up.code !== 0) throw new UserError('step.exitCode', { code: up.code });
         for (const m of manifest) {
           const container = containerName(name, m.service, cfg.services?.[m.service]);
           await waitReady(container, m.kind, out, t);
           out(t('backup.log.importing', { service: m.service }) + '\n');
-          const imp = await run('docker', ['exec', '-i', container, 'sh', '-c', restoreCommand(m.kind)], {
-            stdinFile: path.join(dumps, m.file), onStdout: out,
-          });
-          if (imp.code !== 0) throw new UserError('backup.importFailed', { service: m.service, output: imp.stderr.trim().slice(-800) });
+          try { await importDump(container, m, path.join(dumps, m.file), out, t); } catch (err) {
+            // The app is not started on a half-loaded database; the dump stays for a manual import.
+            out(t('backup.log.dumpKept', { path: path.join(dumps, m.file) }) + '\n');
+            throw err;
+          }
         }
       }
       fs.rmSync(dumps, { recursive: true, force: true });
       await stacks.prepare(name, out, t);
-      const all = await stacks.compose(name, ['up', '-d', '--remove-orphans'], out);
+      const all = await stacks.compose(name, ['up', '-d', '--remove-orphans', ...noPull], out);
       if (all.code !== 0) throw new UserError('step.exitCode', { code: all.code });
       out(t('backup.log.restored', { stack: name, time: snap.time.slice(0, 16).replace('T', ' ') }) + '\n');
     };
@@ -794,7 +930,7 @@ export function createBackups({ db, stacks, stacksDir, dataDir, sqlite }) {
   return {
     stackExcludes, setStackExcludes,
     publicConfig, saveConfig, revealPassword, test, status, snapshots, runs, runAll, backupOne, restore,
-    restoreRun, restoreServer, serverRestoreStatus, connectExisting, verifyNow, startScheduler, hooks,
+    restoreRun, restoreServer, serverRestoreStatus, connectExisting, verifyNow, startScheduler, hooks, preUpdateSince,
     busy: () => Boolean(current),
   };
 }

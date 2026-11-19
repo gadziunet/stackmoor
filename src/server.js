@@ -80,7 +80,12 @@ const autoUpdate = createAutoUpdate({
   db, stacks, updates, backups, ...settingsApi, getT, isRebooting: () => system.isRebooting(),
   onResult: (r) => (r.result === 'updated'
     ? notify('autoUpdated', { stack: r.stack, images: (r.images || []).join(', ') }, { level: 'ok', subject: r.stack })
-    : notify('autoProblem', { stack: r.stack, reason: r.reason || '' }, { variant: r.result, level: 'error', subject: r.stack })),
+    : notify('autoProblem', {
+      stack: r.stack,
+      reason: r.reason || '',
+      // The images went back; the data is restored by the admin, from the stack's page.
+      data: r.snapshot ? ` ${getT()('nt.autoProblem.data', { stack: r.stack })}` : '',
+    }, { variant: r.result, level: 'error', subject: r.stack })),
 });
 autoUpdate.startScheduler();
 const system = createSystem({
@@ -492,6 +497,20 @@ app.put('/api/autoupdate', (req, res) => {
   autoUpdate.saveConfig(req.body || {});
   res.json(autoUpdate.status());
 });
+// The newest failed automatic update of a stack whose data can be restored from before it.
+app.get('/api/stacks/:name/pending-restore', wrap(async (req, res) => {
+  stacks.assertName(req.params.name);
+  const run = autoUpdate.pendingRestore(req.params.name);
+  // The retention rules may have removed that backup since.
+  const list = run ? await backups.snapshots().catch(() => []) : [];
+  const snap = run && list.find((x) => x.id === run.snapshot || x.shortId === run.snapshot);
+  res.json({ run: snap ? { ...run, snapshotTime: snap.time } : null });
+}));
+app.post('/api/autoupdate/dismiss', (req, res) => {
+  const stack = String(req.body?.stack || '');
+  stacks.assertName(stack);
+  res.json({ ok: autoUpdate.dismiss(stack, String(req.body?.at || '')) });
+});
 app.post('/api/autoupdate/run', (_req, res) => {
   autoUpdate.runAll('manual').catch((err) => console.error('Automatic update failed:', err.message));
   res.json(autoUpdate.status());
@@ -625,7 +644,10 @@ app.post('/api/backups/restore', wrap(async (req, res) => {
   const target = String(req.body?.target || '');
   if (!target || req.body?.confirm !== target) return fail(req, res, 400, 'delete.confirm');
   stacks.assertName(target);
-  background(backups.restore(String(req.body.snapshot || ''), target, req.t));
+  // afterUpdate: the restore was started from a failed automatic update – its notice goes away once it worked.
+  const afterUpdate = req.body?.afterUpdate ? String(req.body.afterUpdate) : '';
+  background(backups.restore(String(req.body.snapshot || ''), target, req.t)
+    .then((r) => { if (afterUpdate) autoUpdate.dismiss(target, afterUpdate); return r; }));
   res.status(202).json({ ok: true });
 }));
 

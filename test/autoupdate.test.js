@@ -46,7 +46,7 @@ test('schedules and settings from the form are checked', () => {
 });
 
 // A pretend stack: "update" swaps the image; the new one may be broken.
-function world({ broken }) {
+function world({ broken, preUpdate = null }) {
   const db = openDb(':memory:');
   let image = 'sha256:old';
   const tags = [];
@@ -85,7 +85,7 @@ function world({ broken }) {
   };
   saveSettings(db, { autoUpdate: { ...getSettings(db).autoUpdate, exclude: ['skip'] } });
   const auto = createAutoUpdate({
-    db, stacks, updates, backups: { busy: () => false },
+    db, stacks, updates, backups: { busy: () => false, preUpdateSince: (name, since) => (preUpdate && preUpdate.at >= since ? preUpdate : null) },
     getSettings: () => getSettings(db), saveSettings: (p) => saveSettings(db, p),
     getT: () => (key, vars) => `${key}${vars ? JSON.stringify(vars) : ''}`,
     run, healthOpts: { settle: 0, every: 0, wait: async () => {} },
@@ -115,4 +115,45 @@ test('a broken update goes back to the previous images', async () => {
     'stackmoor-rollback/demo:0 -> example/web:latest',
     'rmi stackmoor-rollback/demo:0',
   ]);
+});
+
+test('after a broken update the admin is offered the backup from just before it', async () => {
+  const w = world({ broken: true, preUpdate: { snapshot: 'a'.repeat(64), at: '2999-01-01T00:00:00.000Z' } });
+  const [r] = await w.auto.runAll('scheduled');
+  assert.equal(r.result, 'rolledBack');
+  assert.equal(r.snapshot, 'a'.repeat(64));
+  // Only the data is left to the admin: the notice stays until restored or hidden.
+  assert.equal(w.auto.pendingRestore('demo').at, r.at);
+  assert.equal(w.auto.pendingRestore('other'), null);
+  assert.equal(w.auto.dismiss('demo', 'wrong time'), false);
+  assert.equal(w.auto.dismiss('demo', r.at), true);
+  assert.equal(w.auto.pendingRestore('demo'), null);
+});
+
+test('an old before-update backup is not offered for a newer update', async () => {
+  const w = world({ broken: true, preUpdate: { snapshot: 'b'.repeat(64), at: '2000-01-01T00:00:00.000Z' } });
+  const [r] = await w.auto.runAll('scheduled');
+  assert.equal(r.snapshot, null);
+  assert.equal(w.auto.pendingRestore('demo'), null);
+});
+
+test('a second failed try keeps the backup from before the first one', async () => {
+  const pre = { snapshot: 'c'.repeat(64), at: '2999-01-01T00:00:00.000Z' };
+  const w = world({ broken: true, preUpdate: pre });
+  const [first] = await w.auto.runAll('scheduled');
+  pre.snapshot = 'd'.repeat(64); // the next night's backup already has the broken version's data
+  const [second] = await w.auto.runAll('scheduled');
+  assert.equal(second.snapshot, 'c'.repeat(64));
+  assert.equal(second.since, first.at);
+  assert.equal(w.auto.pendingRestore('demo').snapshot, 'c'.repeat(64));
+});
+
+test('the notice ends once the stack was updated or restored by hand', async () => {
+  const w = world({ broken: true, preUpdate: { snapshot: 'e'.repeat(64), at: '2999-01-01T00:00:00.000Z' } });
+  await w.auto.runAll('scheduled');
+  assert.ok(w.auto.pendingRestore('demo'));
+  w.db.prepare(`INSERT INTO operations(stack, action, status, finished_at) VALUES ('demo', 'rollback', 'ok', '2999-12-31 00:00:00')`).run();
+  assert.ok(w.auto.pendingRestore('demo')); // the automatic way back does not count
+  w.db.prepare(`INSERT INTO operations(stack, action, status, finished_at) VALUES ('demo', 'restore', 'ok', '2999-12-31 00:00:00')`).run();
+  assert.equal(w.auto.pendingRestore('demo'), null);
 });

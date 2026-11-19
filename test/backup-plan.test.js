@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   repoUrl, dumpKind, dumpCommand, restoreCommand, readyCommand, dataFolders, retentionArgs,
-  localParts, isDue, containerName,
+  localParts, isDue, containerName, imageRepo, pickDigest, recordImages, imagesPlan, psqlLine, sharedRefs, limitedShell,
 } from '../src/backup-plan.js';
 
 test('repository URL', () => {
@@ -148,4 +148,80 @@ test('dump manifest: only known kinds, services of the stack and the exact file 
   for (const m of bad) {
     assert.throws(() => cleanManifest([m], services), (e) => e.key === 'backup.badManifest', JSON.stringify(m));
   }
+});
+
+const ID = (c) => `sha256:${c.repeat(64)}`;
+
+test('image repository and digest for a reference', () => {
+  assert.equal(imageRepo('postgres:16'), 'postgres');
+  assert.equal(imageRepo('registry.example.com:5000/team/app:1.2'), 'registry.example.com:5000/team/app');
+  assert.equal(imageRepo('registry.example.com:5000/team/app'), 'registry.example.com:5000/team/app');
+  assert.equal(imageRepo(`ghcr.io/x/app@${ID('a')}`), 'ghcr.io/x/app');
+  const digests = [`other/app@${ID('1')}`, `ghcr.io/x/app@${ID('2')}`];
+  assert.equal(pickDigest('ghcr.io/x/app:latest', digests), `ghcr.io/x/app@${ID('2')}`);
+  assert.equal(pickDigest('nothing:here', digests), `other/app@${ID('1')}`);
+  assert.equal(pickDigest('a:b', ['bad digest', '']), null);
+  assert.equal(pickDigest('a:b', undefined), null);
+});
+
+test('a backup records the exact image of every service', () => {
+  const c = (svc, ref, id) => ({ Config: { Image: ref, Labels: { 'com.docker.compose.service': svc } }, Image: id });
+  const record = recordImages(
+    [c('web', 'ghcr.io/x/app:latest', ID('a')), c('web', 'ghcr.io/x/app:latest', ID('a')), c('db', 'postgres:16', ID('b')),
+      c('built', 'demo-built', ID('c')), c('broken', 'x:1', 'not-an-id'), { Config: {}, Image: ID('d') }],
+    [{ Id: ID('a'), RepoDigests: [`ghcr.io/x/app@${ID('e')}`] }, { Id: ID('b'), RepoDigests: [`postgres@${ID('f')}`] }, { Id: ID('c'), RepoDigests: [] }],
+  );
+  assert.deepEqual(record, { version: 1, images: [
+    { service: 'web', ref: 'ghcr.io/x/app:latest', id: ID('a'), digest: `ghcr.io/x/app@${ID('e')}` },
+    { service: 'db', ref: 'postgres:16', id: ID('b'), digest: `postgres@${ID('f')}` },
+    { service: 'built', ref: 'demo-built', id: ID('c'), digest: null },
+  ] });
+});
+
+test('a restore only trusts the recorded ids and digests, the names come from the compose file', () => {
+  const services = { web: { image: 'ghcr.io/x/app:latest' }, db: { image: 'postgres:16' }, edited: { image: 'app:2' }, pinned: { image: `postgres@${ID('9')}` }, build: { build: '.' } };
+  const plan = imagesPlan({ images: [
+    { service: 'web', ref: 'ghcr.io/x/app:latest', id: ID('a'), digest: `ghcr.io/x/app@${ID('e')}` },
+    { service: 'web', ref: 'ghcr.io/x/app:latest', id: ID('1') }, // the same service twice: the first counts
+    { service: 'db', ref: 'postgres:16', id: '--force', digest: `postgres@${ID('f')}` },
+    { service: 'edited', ref: 'app:1', id: ID('5') }, // compose.yaml now says app:2
+    { service: 'pinned', id: ID('2') }, // pinned in compose.yaml: nothing to do
+    { service: 'build', id: ID('3') }, // no image name in compose.yaml
+    { service: 'gone', id: ID('4') }, // not in the restored compose file
+    { service: 'web2', id: 'x', digest: 'y' },
+  ] }, services);
+  assert.deepEqual(plan, [
+    { service: 'web', ref: 'ghcr.io/x/app:latest', id: ID('a'), digest: `ghcr.io/x/app@${ID('e')}` },
+    { service: 'db', ref: 'postgres:16', id: null, digest: `postgres@${ID('f')}` },
+  ]);
+  assert.deepEqual(imagesPlan(null, services), []);
+  assert.deepEqual(imagesPlan({ images: 'nope' }, services), []);
+  assert.deepEqual(imagesPlan({ images: [{ service: 'db', ref: 'postgres:16', id: 'bad', digest: 'bad' }] }, services), []);
+});
+
+test('psql errors while importing: "already exists" is harmless, anything else fails the restore', () => {
+  assert.equal(psqlLine('psql:<stdin>:14: ERROR:  role "postgres" already exists'), 'ignored');
+  assert.equal(psqlLine('psql:<stdin>:20: ERROR:  database "app" already exists'), 'ignored');
+  assert.equal(psqlLine('psql:<stdin>:99: ERROR:  duplicate key value violates unique constraint "users_pkey"'), 'error');
+  assert.equal(psqlLine('psql:<stdin>:7: ERROR:  could not open extension control file "vector.control"'), 'error');
+  assert.equal(psqlLine('psql: FATAL:  password authentication failed'), 'error');
+  // Only roles and databases: a table the app already made means the schema may differ.
+  assert.equal(psqlLine('psql:<stdin>:40: ERROR:  relation "users" already exists'), 'error');
+  assert.equal(psqlLine('SET'), null);
+  assert.equal(psqlLine('NOTICE:  table "x" does not exist, skipping'), null);
+});
+
+test('image names used by other stacks are found', () => {
+  const shared = sharedRefs('demo\tpostgres:16\nother\tpostgres:16\nthird\tpostgres:16\nother\tpostgres:16\n\tbare:1\ndemo\tonly:mine\n', 'demo');
+  assert.deepEqual(shared.get('postgres:16'), ['other', 'third']);
+  assert.equal(shared.has('only:mine'), false);
+  assert.equal(shared.has('bare:1'), false);
+});
+
+test('database commands get a time limit inside the container', () => {
+  const args = limitedShell('pg_dumpall -U "$X"', 6 * 3600e3);
+  assert.equal(args[0], 'sh');
+  assert.equal(args[3], '21600');
+  assert.equal(args[4], 'pg_dumpall -U "$X"'); // passed as an argument, never pasted into the script
+  assert.match(args[2], /exec timeout "\$0" sh -c "\$1"/);
 });

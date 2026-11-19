@@ -298,3 +298,105 @@ export function cleanManifest(entries, services) {
 }
 
 export const excludeArgs = (dir, patterns) => patterns.flatMap((p) => ['--exclude', `${dir.replace(/\/+$/, '')}/${p}`]);
+
+// ---------- images (restore brings back the exact images that ran) ----------
+
+const IMAGE_ID = /^sha256:[a-f0-9]{64}$/;
+const DIGEST_REF = /^[a-z0-9][a-z0-9._/:-]{0,250}@sha256:[a-f0-9]{64}$/;
+
+/** "ghcr.io/x/app:1.2" → "ghcr.io/x/app" (a port in the registry address stays). */
+export function imageRepo(ref) {
+  const noDigest = String(ref || '').split('@')[0];
+  const slash = noDigest.lastIndexOf('/');
+  const colon = noDigest.lastIndexOf(':');
+  return colon > slash ? noDigest.slice(0, colon) : noDigest;
+}
+
+/** The pullable digest of an image for this reference: the one from the same repository, else the first. */
+export function pickDigest(ref, repoDigests) {
+  const list = (repoDigests || []).filter((d) => DIGEST_REF.test(String(d)));
+  const repo = imageRepo(ref);
+  return list.find((d) => imageRepo(d) === repo) || list[0] || null;
+}
+
+/**
+ * What a backup records about the images: for every service of the stack, the reference it
+ * was started from, the exact image id and a digest to download it again.
+ * containers: `docker inspect` of the stack's containers; images: `docker image inspect` by id.
+ */
+export function recordImages(containers, images) {
+  const byId = new Map((images || []).map((i) => [i.Id, i]));
+  const seen = new Map();
+  for (const c of containers || []) {
+    const service = c.Config?.Labels?.['com.docker.compose.service'];
+    const ref = c.Config?.Image;
+    if (!service || !ref || !IMAGE_ID.test(String(c.Image)) || seen.has(service)) continue;
+    seen.set(service, { service, ref, id: c.Image, digest: pickDigest(ref, byId.get(c.Image)?.RepoDigests) });
+  }
+  return { version: 1, images: [...seen.values()] };
+}
+
+/**
+ * What a restore does with the recorded images, checked before anything runs (the file comes
+ * from the backup): only services of the restored compose file, the reference taken from that
+ * file (not from the record), only well-formed ids and digests. Services pinned by digest in
+ * the compose file need nothing. Returns [{ service, ref, id, digest }].
+ */
+export function imagesPlan(record, services) {
+  const list = Array.isArray(record?.images) ? record.images : [];
+  const out = [];
+  for (const r of list) {
+    const service = String(r?.service ?? '');
+    const ref = services?.[service]?.image;
+    if (!ref || String(ref).includes('@') || out.some((x) => x.service === service)) continue;
+    // compose.yaml names another image than the one that ran (edited, not redeployed):
+    // the recorded id belongs to the old name, so it must not be put under the new one.
+    if (String(r?.ref ?? '') !== String(ref)) continue;
+    const id = IMAGE_ID.test(String(r?.id)) ? r.id : null;
+    const digest = DIGEST_REF.test(String(r?.digest)) ? r.digest : null;
+    if (!id && !digest) continue;
+    out.push({ service, ref: String(ref), id, digest });
+  }
+  return out;
+}
+
+// ---------- database import (PostgreSQL) ----------
+
+/**
+ * One line of psql's error output while a dump is read in: 'error', 'ignored' or null.
+ * The dump creates roles and databases the fresh container already has (POSTGRES_USER,
+ * POSTGRES_DB) – those "already exists" errors are harmless. Anything else means
+ * part of the data is missing, so the restore must not say it worked.
+ */
+export function psqlLine(line) {
+  const s = String(line);
+  // psql in English (the official images' default); another lc_messages is not recognised.
+  if (!/\b(ERROR|FATAL|PANIC):/.test(s)) return null;
+  return /\bERROR:\s+(role|database) "[^"]+" already exists\s*$/.test(s) ? 'ignored' : 'error';
+}
+
+/**
+ * Other stacks that use the same image name (`docker ps -a` lines "<project>\t<image>").
+ * Moving such a name to an older image would change those stacks too on their next start.
+ */
+export function sharedRefs(psLines, stack) {
+  const shared = new Map();
+  for (const line of String(psLines || '').split('\n')) {
+    const [project, image] = line.trim().split('\t');
+    if (!project || !image || project === stack) continue;
+    shared.set(image, [...new Set([...(shared.get(image) || []), project])]);
+  }
+  return shared;
+}
+
+/**
+ * `sh -c` arguments that run cmd with a time limit inside the container (if it has `timeout`),
+ * so a stuck dump or import stops there too – not only the `docker exec` that started it.
+ */
+export function limitedShell(cmd, ms) {
+  const script = 'if command -v timeout >/dev/null 2>&1; then exec timeout "$0" sh -c "$1"; fi; exec sh -c "$1"';
+  return ['sh', '-c', script, String(Math.ceil(ms / 1000)), cmd];
+}
+
+/** Generous limits – a stuck dump or import must not block the job queue forever. */
+export const DB_TIMEOUTS = { dump: 6 * 3600e3, import: 12 * 3600e3, redisSave: 3600e3 };

@@ -1246,6 +1246,8 @@ async function renderStack(name) {
       </div>`);
   }
 
+  showPendingRestore(name);
+
   let currentTab = 'compose';
   const tab = document.getElementById('tab');
   let routesInfo = null;
@@ -2194,7 +2196,9 @@ async function autoUpdateCard(box) {
         <tbody>${d.runs.map((r) => `
           <tr><td>${esc(fmtDate(r.at))}<br><span class="hint">${t(r.kind === 'scheduled' ? 'au.kind.scheduled' : 'au.kind.manual')}</span></td>
             <td><a href="#/stack/${esc(r.stack)}">${esc(r.stack)}</a>${(r.images || []).length ? `<br><span class="hint">${r.images.map((i) => `<code>${esc(i)}</code>`).join(' ')}</span>` : ''}</td>
-            <td>${resultTag(r)}${r.reason ? `<br><span class="hint">${esc(r.reason)}</span>` : ''}</td></tr>`).join('')}</tbody>
+            <td>${resultTag(r)}${r.reason ? `<br><span class="hint">${esc(r.reason)}</span>` : ''}${
+              r.snapshot && !r.dismissed && ['rolledBack', 'rollbackFailed'].includes(r.result) && d.runs.find((x) => x.stack === r.stack) === r
+                ? `<br><a href="#/stack/${esc(r.stack)}">${t('pu.restore')} →</a>` : ''}</td></tr>`).join('')}</tbody>
       </table>` : `<p class="hint" style="margin:4px 12px 12px">${t('au.historyNone')}</p>`}
     </div>`;
 
@@ -3059,6 +3063,73 @@ function nextBackup(c) {
     if (d > now && c.days.includes(d.getDay())) return d;
   }
   return null;
+}
+
+/**
+ * After a failed automatic update the images go back on their own, the data does not (as in
+ * Cloudron): this notice offers to restore the whole stack from the backup made just before it.
+ */
+async function showPendingRestore(name) {
+  const r = await api('GET', `/api/stacks/${encodeURIComponent(name)}/pending-restore`).catch(() => null);
+  const box = document.getElementById('notice');
+  const run = r?.run;
+  if (!run || !box || route().name !== name || document.getElementById('pre-upd')) return;
+  box.insertAdjacentHTML('beforeend', `
+    <form class="notice warn" id="pre-upd">
+      <strong>${t(run.result === 'rolledBack' ? 'pu.titleBack' : 'pu.titleFailed', { date: esc(fmtDate(run.since || run.at)) })}</strong>
+      ${run.reason ? `<p class="hint" style="margin:4px 0">${esc(run.reason)}</p>` : ''}
+      <p style="margin:6px 0">${t('pu.lead')}</p>
+      <div class="row" id="pu-start"><button type="button" class="btn primary small" id="pu-open">${t('pu.restore')}</button>
+        <button type="button" class="btn small" id="pu-dismiss">${t('pu.dismiss')}</button></div>
+      <div id="pu-confirm" hidden>
+        <p style="margin:6px 0">${t('pu.snapshot', { date: esc(fmtDate(run.snapshotTime)) })}</p>
+        <p class="hint" style="margin:6px 0">${t('bak.restoreLead')}</p>
+        <div class="field"><label for="pu-name">${t('bak.restoreConfirm')}</label>
+          <input type="text" id="pu-name" autocapitalize="off" autocomplete="off" placeholder="${esc(name)}"></div>
+        <div id="pu-out"></div>
+        <div class="row"><button class="btn primary">${t('pu.restore')}</button>
+          <button type="button" class="btn" id="pu-cancel">${t('bak.cancel')}</button></div>
+      </div>
+      <pre class="terminal" id="pu-log" hidden></pre>
+    </form>`);
+  const form = document.getElementById('pre-upd');
+  const $ = (sel) => form.querySelector(sel);
+  $('#pu-open').addEventListener('click', () => {
+    $('#pu-start').hidden = true;
+    $('#pu-confirm').hidden = false;
+    $('#pu-name').focus();
+  });
+  $('#pu-cancel').addEventListener('click', () => {
+    $('#pu-start').hidden = false;
+    $('#pu-confirm').hidden = true;
+  });
+  $('#pu-dismiss').addEventListener('click', async () => {
+    await api('POST', '/api/autoupdate/dismiss', { stack: name, at: run.at }).catch(() => {});
+    form.remove();
+  });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await api('POST', '/api/backups/restore', {
+        snapshot: run.snapshot, target: name, confirm: $('#pu-name').value.trim(), afterUpdate: run.at,
+      });
+    } catch (err) {
+      $('#pu-out').innerHTML = errorBox(err);
+      return;
+    }
+    $('#pu-confirm').hidden = true;
+    watchBackupJob($('#pu-log'), (st) => {
+      const last = st.history?.[0];
+      toast(t(last?.ok ? 'toast.done' : 'toast.failed'));
+      refreshStacks().catch(() => {});
+      if (last?.ok) {
+        form.querySelector('strong').textContent = t('pu.done');
+        form.className = 'notice info';
+      } else {
+        $('#pu-start').hidden = false;
+      }
+    });
+  });
 }
 
 /** Shows the running backup job's log in `pre` until it finishes, then calls done(). */
